@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { ProgressDisplay } from "@/components/progress-display";
 import { VideoPlayer } from "@/components/video-player";
 import { ClipCard } from "@/components/clip-card";
@@ -43,7 +44,35 @@ export default function TaskPage() {
       .then(setTask);
   }, [taskId]);
 
-  if (!task) return <div className="text-center text-muted-foreground">Loading...</div>;
+  // Auto-refresh when SSE reports completion
+  useEffect(() => {
+    if (!task || ["completed", "failed"].includes(task.status)) return;
+
+    const evtSource = new EventSource(`/api/tasks/${taskId}/sse`);
+    evtSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.status === "completed" || data.status === "failed") {
+          evtSource.close();
+          // Re-fetch full task data
+          fetch(`/api/tasks/${taskId}`)
+            .then((res) => res.json())
+            .then(setTask);
+        }
+      } catch {}
+    };
+    evtSource.onerror = () => evtSource.close();
+    return () => evtSource.close();
+  }, [task?.status, taskId]);
+
+  if (!task) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-16">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <p className="text-sm text-muted-foreground">Loading task...</p>
+      </div>
+    );
+  }
 
   const isProcessing = !["completed", "failed"].includes(task.status);
   const result: TaskResult | null = task.result ? JSON.parse(task.result) : null;
@@ -93,7 +122,7 @@ export default function TaskPage() {
           {/* Clips */}
           {result.clips && result.clips.length > 0 && (
             <section className="space-y-4">
-              <h2 className="text-xl font-semibold">Highlight Clips</h2>
+              <h2 className="text-xl font-semibold">Highlight Clips ({result.clips.length})</h2>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 {result.clips.map((clip, i) => (
                   <ClipCard
@@ -101,6 +130,7 @@ export default function TaskPage() {
                     title={clip.title}
                     duration={clip.duration}
                     score={clip.score}
+                    previewUrl={`/api/tasks/${taskId}/download?type=cleaned`}
                     downloadUrl={`/api/tasks/${taskId}/download?type=clips`}
                   />
                 ))}
@@ -108,8 +138,8 @@ export default function TaskPage() {
             </section>
           )}
 
-          {/* Download all */}
-          <div className="flex justify-center">
+          {/* Actions */}
+          <div className="flex items-center justify-center gap-4 border-t border-border pt-6">
             <a
               href={`/api/tasks/${taskId}/download?type=all`}
               download
@@ -117,6 +147,12 @@ export default function TaskPage() {
             >
               Download All (ZIP)
             </a>
+            <Link
+              href="/"
+              className={cn(buttonVariants({ variant: "outline", size: "lg" }))}
+            >
+              New Task
+            </Link>
           </div>
         </div>
       )}
