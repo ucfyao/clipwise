@@ -26,7 +26,7 @@ export async function aiChat(prompt: string, maxTokens = 8192): Promise<AIRespon
 
   if (provider === "gemini") {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     const result = await model.generateContent({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: { maxOutputTokens: maxTokens },
