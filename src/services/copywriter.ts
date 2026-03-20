@@ -1,4 +1,4 @@
-import { getClaude } from "@/lib/claude";
+import { aiChat, extractJSON } from "@/lib/ai";
 
 export interface PlatformCopy {
   platform: string;
@@ -16,14 +16,7 @@ export async function generateCopy(
   clips: Array<{ title: string; start: number; end: number; reason: string }>,
   videoContext: string
 ): Promise<ClipCopy[]> {
-  const claude = getClaude();
-  const response = await claude.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 4096,
-    messages: [
-      {
-        role: "user",
-        content: `你是一个短视频运营专家。为以下教学视频片段生成多平台发布文案。
+  const prompt = `你是一个短视频运营专家。为以下教学视频片段生成多平台发布文案。
 
 视频主题: ${videoContext}
 
@@ -66,17 +59,11 @@ ${clips.map((c, i) => `${i + 1}. "${c.title}" (${Math.round(c.end - c.start)}秒
   ]
 }
 
-只返回 JSON，不要其他文字。`,
-      },
-    ],
-  });
-
-  const text = response.content[0].type === "text" ? response.content[0].text : "";
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) return [];
+只返回 JSON，不要其他文字。`;
 
   try {
-    const result = JSON.parse(jsonMatch[0]);
+    const response = await aiChat(prompt, 4096);
+    const result = extractJSON<{ clips: ClipCopy[] }>(response.text);
     return result.clips || [];
   } catch {
     return [];

@@ -1,4 +1,4 @@
-import { getClaude } from "@/lib/claude";
+import { aiChat, extractJSON } from "@/lib/ai";
 import fs from "fs/promises";
 
 export interface Clip {
@@ -19,14 +19,7 @@ export async function extractHighlights(
   const raw = await fs.readFile(transcriptPath, "utf-8");
   const transcript = JSON.parse(raw);
 
-  const claude = getClaude();
-  const response = await claude.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 4096,
-    messages: [
-      {
-        role: "user",
-        content: `You are a content strategist. Extract the best short-form video clips from this teaching video transcript.
+  const prompt = `You are a content strategist. Extract the best short-form video clips from this teaching video transcript.
 
 Find segments that are:
 - Self-contained (make sense without context)
@@ -52,16 +45,10 @@ Respond with ONLY valid JSON:
   ]
 }
 
-Sort by score descending. Return up to 10 clips. Clips should not overlap.`,
-      },
-    ],
-  });
+Sort by score descending. Return up to 10 clips. Clips should not overlap.`;
 
-  const text = response.content[0].type === "text" ? response.content[0].text : "";
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("Claude did not return valid JSON");
-
-  const result: ExtractionResult = JSON.parse(jsonMatch[0]);
+  const response = await aiChat(prompt, 4096);
+  const result = extractJSON<ExtractionResult>(response.text);
   result.clips = result.clips.filter(
     (c) => c.start >= 0 && c.end > c.start && c.end <= transcript.duration + 1
   );

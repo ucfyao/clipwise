@@ -5,14 +5,23 @@ import path from "path";
 const SETTINGS_PATH = path.join(process.cwd(), "data", "settings.json");
 
 interface Settings {
+  ai_provider: "gemini" | "claude";
+  gemini_api_key: string;
   anthropic_api_key: string;
   whisper_model: string;
 }
 
 const DEFAULTS: Settings = {
+  ai_provider: "gemini",
+  gemini_api_key: "",
   anthropic_api_key: "",
   whisper_model: "large-v3",
 };
+
+function maskKey(key: string): string {
+  if (!key) return "";
+  return key.slice(0, 8) + "..." + key.slice(-4);
+}
 
 async function getSettings(): Promise<Settings> {
   try {
@@ -25,12 +34,12 @@ async function getSettings(): Promise<Settings> {
 
 export async function GET() {
   const settings = await getSettings();
-  // Mask API key for display
-  const masked = { ...settings };
-  if (masked.anthropic_api_key) {
-    masked.anthropic_api_key = masked.anthropic_api_key.slice(0, 10) + "..." + masked.anthropic_api_key.slice(-4);
-  }
-  return NextResponse.json(masked);
+  return NextResponse.json({
+    ai_provider: settings.ai_provider,
+    gemini_api_key: maskKey(settings.gemini_api_key),
+    anthropic_api_key: maskKey(settings.anthropic_api_key),
+    whisper_model: settings.whisper_model,
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -41,7 +50,10 @@ export async function POST(req: NextRequest) {
   await fs.mkdir(path.dirname(SETTINGS_PATH), { recursive: true });
   await fs.writeFile(SETTINGS_PATH, JSON.stringify(updated, null, 2));
 
-  // Also set env var for current process
+  // Set env vars for current process
+  if (updated.gemini_api_key) {
+    process.env.GEMINI_API_KEY = updated.gemini_api_key;
+  }
   if (updated.anthropic_api_key) {
     process.env.ANTHROPIC_API_KEY = updated.anthropic_api_key;
   }

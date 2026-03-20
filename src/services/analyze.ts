@@ -1,4 +1,4 @@
-import { getClaude } from "@/lib/claude";
+import { aiChat, extractJSON } from "@/lib/ai";
 import fs from "fs/promises";
 
 export interface Segment {
@@ -27,7 +27,7 @@ export async function analyzeTranscript(
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      return await callClaude(transcript, silenceThreshold, keepFillers);
+      return await callAI(transcript, silenceThreshold, keepFillers);
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       if (attempt < MAX_RETRIES) continue;
@@ -37,19 +37,12 @@ export async function analyzeTranscript(
   throw lastError;
 }
 
-async function callClaude(
+async function callAI(
   transcript: { segments: unknown[]; duration: number },
   silenceThreshold: number,
   keepFillers: boolean
 ): Promise<AnalysisResult> {
-  const claude = getClaude();
-  const response = await claude.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 16384,
-    messages: [
-      {
-        role: "user",
-        content: `You are a video editor assistant. Analyze this transcript and classify each segment.
+  const prompt = `You are a video editor assistant. Analyze this transcript and classify each segment.
 
 Rules:
 - Mark gaps longer than ${silenceThreshold} seconds as "silence"
@@ -78,20 +71,10 @@ Respond with ONLY valid JSON matching this schema:
 Requirements:
 - Segments must cover the entire duration from 0 to ${transcript.duration}
 - No gaps or overlaps between segments
-- end of one segment equals start of next`,
-      },
-    ],
-  });
+- end of one segment equals start of next`;
 
-  if (response.stop_reason !== "end_turn") {
-    throw new Error("Claude response was truncated — transcript may be too long");
-  }
-
-  const text = response.content[0].type === "text" ? response.content[0].text : "";
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("Claude did not return valid JSON");
-
-  const result: AnalysisResult = JSON.parse(jsonMatch[0]);
+  const response = await aiChat(prompt, 16384);
+  const result = extractJSON<AnalysisResult>(response.text);
   validateSegments(result.segments, transcript.duration);
   return result;
 }

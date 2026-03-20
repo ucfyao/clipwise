@@ -10,6 +10,7 @@ import { extractHighlights } from "./extract";
 import { cleanVideo, extractClip } from "./ffmpeg";
 import { generateSRT, generateAnimatedASS } from "./subtitle";
 import { generateCopy } from "./copywriter";
+import { hasAIKey } from "@/lib/ai";
 
 // Ensure data directories exist
 async function ensureDirs() {
@@ -145,7 +146,7 @@ async function processTask(taskId: string) {
 
     // === Step 2: Feature A — Clean ===
     if (task.mode === "clean" || task.mode === "both") {
-      const hasApiKey = !!process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== "sk-ant-xxx";
+      const hasApiKey = hasAIKey();
 
       let analysis: AnalysisResult;
       if (hasApiKey) {
@@ -183,7 +184,7 @@ async function processTask(taskId: string) {
     }
 
     // === Step 3: Feature B — Highlights (requires API key) ===
-    const hasApiKeyForHighlights = !!process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== "sk-ant-xxx";
+    const hasApiKeyForHighlights = hasAIKey();
     if ((task.mode === "highlights" || task.mode === "both") && hasApiKeyForHighlights) {
       updateTask(taskId, { progress: 70, current_step: "Extracting highlights..." });
 
