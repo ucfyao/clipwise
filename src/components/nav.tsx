@@ -8,8 +8,9 @@ export function Nav() {
   const pathname = usePathname();
 
   const links = [
-    { href: "/", label: "Upload" },
-    { href: "/tasks", label: "Tasks" },
+    { href: "/", label: "上传" },
+    { href: "/tasks", label: "任务" },
+    { href: "/settings", label: "设置" },
   ];
 
   return (

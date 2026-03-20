@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Nav } from "@/components/nav";
 import { Toaster } from "@/components/ui/sonner";
@@ -16,7 +16,11 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "ClipWise",
-  description: "One-click video editing for teaching",
+  description: "一键视频剪辑",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#7c3aed",
 };
 
 export default function RootLayout({
