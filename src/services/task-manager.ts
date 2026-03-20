@@ -1,0 +1,193 @@
+import { randomUUID } from "crypto";
+import fs from "fs/promises";
+import path from "path";
+import { getDb } from "@/lib/db";
+import { Task, TaskConfig, TaskResult, DEFAULT_CONFIG } from "@/lib/schema";
+import { UPLOADS_DIR, TRANSCRIPTS_DIR, OUTPUTS_DIR, TEMP_DIR } from "@/lib/constants";
+import { transcribeVideo } from "./transcribe";
+import { analyzeTranscript, AnalysisResult } from "./analyze";
+import { extractHighlights } from "./extract";
+import { cleanVideo, extractClip } from "./ffmpeg";
+import { generateSRT } from "./subtitle";
+
+// Ensure data directories exist
+async function ensureDirs() {
+  for (const dir of [UPLOADS_DIR, TRANSCRIPTS_DIR, OUTPUTS_DIR, TEMP_DIR]) {
+    await fs.mkdir(dir, { recursive: true });
+  }
+}
+
+// --- SSE listener management ---
+const listeners = new Map<string, ((data: string) => void)[]>();
+
+export function addSSEListener(taskId: string, cb: (data: string) => void) {
+  if (!listeners.has(taskId)) listeners.set(taskId, []);
+  listeners.get(taskId)!.push(cb);
+}
+
+export function removeSSEListener(taskId: string, cb: (data: string) => void) {
+  const cbs = listeners.get(taskId);
+  if (cbs) {
+    const idx = cbs.indexOf(cb);
+    if (idx >= 0) cbs.splice(idx, 1);
+    if (cbs.length === 0) listeners.delete(taskId);
+  }
+}
+
+function notifyListeners(taskId: string, data: object) {
+  const cbs = listeners.get(taskId);
+  if (cbs) {
+    const msg = `data: ${JSON.stringify(data)}\n\n`;
+    cbs.forEach((cb) => cb(msg));
+  }
+}
+
+// --- DB helpers ---
+function updateTask(id: string, updates: Partial<Task>) {
+  const db = getDb();
+  const sets: string[] = [];
+  const values: unknown[] = [];
+
+  for (const [key, value] of Object.entries(updates)) {
+    sets.push(`${key} = ?`);
+    values.push(value);
+  }
+  sets.push("updated_at = datetime('now')");
+  values.push(id);
+
+  db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+  notifyListeners(id, { ...updates, id });
+}
+
+export function getTask(id: string): Task | undefined {
+  return getDb().prepare("SELECT * FROM tasks WHERE id = ?").get(id) as Task | undefined;
+}
+
+export function listTasks(): Task[] {
+  return getDb().prepare("SELECT * FROM tasks ORDER BY created_at DESC").all() as Task[];
+}
+
+// --- Task lifecycle ---
+export async function createTask(
+  filename: string,
+  filepath: string,
+  mode: string,
+  config: TaskConfig = DEFAULT_CONFIG
+): Promise<string> {
+  await ensureDirs();
+  const id = randomUUID();
+  const db = getDb();
+
+  db.prepare(
+    `INSERT INTO tasks (id, filename, filepath, mode, config) VALUES (?, ?, ?, ?, ?)`
+  ).run(id, filename, filepath, mode, JSON.stringify(config));
+
+  // Fire and forget — errors are caught and stored in DB
+  processTask(id).catch((err) => {
+    console.error(`Task ${id} failed:`, err);
+    updateTask(id, { status: "failed", error: err.message });
+  });
+
+  return id;
+}
+
+export async function retryTask(id: string) {
+  updateTask(id, { status: "pending", progress: 0, error: null, current_step: "" });
+  processTask(id).catch((err) => {
+    updateTask(id, { status: "failed", error: err.message });
+  });
+}
+
+// --- Processing pipeline ---
+// Progress mapping: 0-30% transcription, 30-50% analysis, 50-75% FFmpeg clean, 75-95% clips, 95-100% done
+async function processTask(taskId: string) {
+  const db = getDb();
+  const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as Task;
+  if (!task) throw new Error("Task not found");
+
+  const config: TaskConfig = JSON.parse(task.config);
+  const result: TaskResult = {};
+
+  try {
+    // === Step 1: Transcribe ===
+    updateTask(taskId, { status: "transcribing", progress: 5, current_step: "Transcribing audio..." });
+
+    const transcriptPath = await transcribeVideo(task.filepath, taskId, (data) => {
+      const pct = Math.min(Math.floor(data.progress * 0.3), 30);
+      updateTask(taskId, { progress: pct, current_step: "Transcribing audio..." });
+    });
+
+    // === Step 2: Feature A — Clean ===
+    if (task.mode === "clean" || task.mode === "both") {
+      updateTask(taskId, { status: "analyzing", progress: 35, current_step: "Analyzing content..." });
+
+      const analysis: AnalysisResult = await analyzeTranscript(
+        transcriptPath,
+        config.silence_threshold,
+        config.keep_fillers
+      );
+
+      updateTask(taskId, { progress: 50, current_step: "Generating subtitles..." });
+      const srtPath = await generateSRT(analysis.segments, path.join(OUTPUTS_DIR, `${taskId}.srt`));
+      result.subtitle_file = srtPath;
+
+      updateTask(taskId, { status: "processing", progress: 55, current_step: "Cleaning video..." });
+      const cleanedPath = await cleanVideo(
+        task.filepath,
+        analysis.segments,
+        taskId,
+        config.burn_subtitles,
+        srtPath
+      );
+      result.cleaned_video = cleanedPath;
+    }
+
+    // === Step 3: Feature B — Highlights ===
+    if (task.mode === "highlights" || task.mode === "both") {
+      updateTask(taskId, { progress: 70, current_step: "Extracting highlights..." });
+
+      const highlights = await extractHighlights(transcriptPath);
+
+      updateTask(taskId, { status: "processing", progress: 75, current_step: "Cutting clips..." });
+      result.clips = [];
+
+      for (let i = 0; i < highlights.clips.length; i++) {
+        const clip = highlights.clips[i];
+        const pct = 75 + Math.floor((i / highlights.clips.length) * 20);
+        updateTask(taskId, { progress: pct, current_step: `Cutting clip ${i + 1}/${highlights.clips.length}...` });
+
+        const clipPath = await extractClip(task.filepath, clip, taskId, i);
+
+        // Generate subtitle for this clip
+        const clipSrtPath = path.join(OUTPUTS_DIR, `${taskId}-clip${i}.srt`);
+        const clipSegments = [{
+          start: 0,
+          end: clip.end - clip.start,
+          type: "keep" as const,
+          text: clip.title,
+        }];
+        await generateSRT(clipSegments, clipSrtPath);
+
+        result.clips.push({
+          title: clip.title,
+          filepath: clipPath,
+          subtitle_file: clipSrtPath,
+          duration: clip.end - clip.start,
+          score: clip.score,
+        });
+      }
+    }
+
+    // === Done ===
+    updateTask(taskId, {
+      status: "completed",
+      progress: 100,
+      current_step: "Done!",
+      result: JSON.stringify(result),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    updateTask(taskId, { status: "failed", error: message, current_step: "Failed" });
+    throw err;
+  }
+}
