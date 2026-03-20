@@ -31,12 +31,27 @@ export function ProgressDisplay({ taskId }: { taskId: string }) {
 
   useEffect(() => {
     startTimeRef.current = Date.now();
+
+    // Request notification permission
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+
     const evtSource = new EventSource(`/api/tasks/${taskId}/sse`);
 
     evtSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         setTask((prev) => ({ ...prev, ...data }));
+
+        // Send browser notification when task completes (if tab is hidden)
+        if (document.hidden && typeof Notification !== "undefined" && Notification.permission === "granted") {
+          if (data.status === "completed") {
+            new Notification("ClipWise", { body: "视频处理完成！" });
+          } else if (data.status === "failed") {
+            new Notification("ClipWise", { body: "处理失败，请重试" });
+          }
+        }
 
         // Calculate ETA
         const progress = data.progress ?? 0;
