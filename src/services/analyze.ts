@@ -96,6 +96,56 @@ Requirements:
   return result;
 }
 
+/**
+ * Basic analysis without Claude API — uses whisper transcript gaps to detect silence.
+ * No filler detection, just silence removal + subtitle generation.
+ */
+export async function analyzeTranscriptBasic(
+  transcriptPath: string,
+  silenceThreshold: number
+): Promise<AnalysisResult> {
+  const raw = await fs.readFile(transcriptPath, "utf-8");
+  const transcript = JSON.parse(raw);
+  const segments: Segment[] = [];
+  const tSegments = transcript.segments as Array<{ start: number; end: number; text: string }>;
+
+  if (!tSegments.length) {
+    return { segments: [{ start: 0, end: transcript.duration, type: "silence" }] };
+  }
+
+  // Mark gap before first segment as silence
+  if (tSegments[0].start > silenceThreshold) {
+    segments.push({ start: 0, end: tSegments[0].start, type: "silence" });
+  } else if (tSegments[0].start > 0) {
+    segments.push({ start: 0, end: tSegments[0].start, type: "keep", text: "" });
+  }
+
+  for (let i = 0; i < tSegments.length; i++) {
+    const seg = tSegments[i];
+    segments.push({ start: seg.start, end: seg.end, type: "keep", text: seg.text });
+
+    // Check gap between this segment and the next
+    if (i < tSegments.length - 1) {
+      const gap = tSegments[i + 1].start - seg.end;
+      if (gap > silenceThreshold) {
+        segments.push({ start: seg.end, end: tSegments[i + 1].start, type: "silence" });
+      } else if (gap > 0.1) {
+        segments.push({ start: seg.end, end: tSegments[i + 1].start, type: "keep", text: "" });
+      }
+    }
+  }
+
+  // Mark gap after last segment as silence
+  const lastEnd = tSegments[tSegments.length - 1].end;
+  if (transcript.duration - lastEnd > silenceThreshold) {
+    segments.push({ start: lastEnd, end: transcript.duration, type: "silence" });
+  } else if (transcript.duration - lastEnd > 0.1) {
+    segments.push({ start: lastEnd, end: transcript.duration, type: "keep", text: "" });
+  }
+
+  return { segments };
+}
+
 function validateSegments(segments: Segment[], duration: number) {
   if (!segments.length) throw new Error("No segments returned");
   for (let i = 0; i < segments.length - 1; i++) {

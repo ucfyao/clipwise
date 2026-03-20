@@ -13,6 +13,7 @@ def progress(step: str, pct: int, **kwargs):
 def main():
     video_path = sys.argv[1]
     output_path = sys.argv[2]
+    model_size = sys.argv[3] if len(sys.argv) > 3 else "large-v3"
 
     if not os.path.isfile(video_path):
         progress("error", 0, error=f"File not found: {video_path}")
@@ -20,7 +21,7 @@ def main():
 
     try:
         progress("loading_model", 5)
-        model = WhisperModel("base", device="cpu", compute_type="int8")
+        model = WhisperModel(model_size, device="cpu", compute_type="int8")
     except Exception as e:
         progress("error", 0, error=f"Failed to load model: {e}")
         sys.exit(1)

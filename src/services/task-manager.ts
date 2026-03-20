@@ -5,7 +5,7 @@ import { getDb } from "@/lib/db";
 import { Task, TaskConfig, TaskResult, DEFAULT_CONFIG } from "@/lib/schema";
 import { UPLOADS_DIR, TRANSCRIPTS_DIR, OUTPUTS_DIR, TEMP_DIR } from "@/lib/constants";
 import { transcribeVideo } from "./transcribe";
-import { analyzeTranscript, AnalysisResult } from "./analyze";
+import { analyzeTranscript, analyzeTranscriptBasic, AnalysisResult } from "./analyze";
 import { extractHighlights } from "./extract";
 import { cleanVideo, extractClip } from "./ffmpeg";
 import { generateSRT } from "./subtitle";
@@ -119,13 +119,23 @@ async function processTask(taskId: string) {
 
     // === Step 2: Feature A — Clean ===
     if (task.mode === "clean" || task.mode === "both") {
-      updateTask(taskId, { status: "analyzing", progress: 35, current_step: "Analyzing content..." });
+      const hasApiKey = !!process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== "sk-ant-xxx";
 
-      const analysis: AnalysisResult = await analyzeTranscript(
-        transcriptPath,
-        config.silence_threshold,
-        config.keep_fillers
-      );
+      let analysis: AnalysisResult;
+      if (hasApiKey) {
+        updateTask(taskId, { status: "analyzing", progress: 35, current_step: "Analyzing content with AI..." });
+        analysis = await analyzeTranscript(
+          transcriptPath,
+          config.silence_threshold,
+          config.keep_fillers
+        );
+      } else {
+        updateTask(taskId, { status: "analyzing", progress: 35, current_step: "Detecting silence (basic mode)..." });
+        analysis = await analyzeTranscriptBasic(
+          transcriptPath,
+          config.silence_threshold
+        );
+      }
 
       updateTask(taskId, { progress: 50, current_step: "Generating subtitles..." });
       const srtPath = await generateSRT(analysis.segments, path.join(OUTPUTS_DIR, `${taskId}.srt`));
@@ -142,8 +152,9 @@ async function processTask(taskId: string) {
       result.cleaned_video = cleanedPath;
     }
 
-    // === Step 3: Feature B — Highlights ===
-    if (task.mode === "highlights" || task.mode === "both") {
+    // === Step 3: Feature B — Highlights (requires API key) ===
+    const hasApiKeyForHighlights = !!process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== "sk-ant-xxx";
+    if ((task.mode === "highlights" || task.mode === "both") && hasApiKeyForHighlights) {
       updateTask(taskId, { progress: 70, current_step: "Extracting highlights..." });
 
       const highlights = await extractHighlights(transcriptPath);
