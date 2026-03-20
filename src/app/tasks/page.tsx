@@ -25,11 +25,31 @@ export default function TasksPage() {
       });
   }, []);
 
-  if (loading) return <div className="text-center text-muted-foreground">Loading...</div>;
+  const handleDelete = async (id: string) => {
+    await fetch(`/api/tasks/${id}`, { method: "DELETE" });
+    setTasks((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-16">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <p className="text-sm text-muted-foreground">Loading...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Tasks</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Tasks</h1>
+        <Link
+          href="/"
+          className="text-sm text-primary hover:underline"
+        >
+          + New Task
+        </Link>
+      </div>
 
       {tasks.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-12 text-center">
@@ -41,7 +61,7 @@ export default function TasksPage() {
       ) : (
         <div className="space-y-3">
           {tasks.map((task) => (
-            <TaskCard key={task.id} {...task} />
+            <TaskCard key={task.id} {...task} onDelete={handleDelete} />
           ))}
         </div>
       )}
