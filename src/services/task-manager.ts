@@ -109,10 +109,35 @@ async function processTask(taskId: string) {
   const result: TaskResult = {};
 
   try {
+    // === Pre-step: Trim video if configured ===
+    let videoPath = task.filepath;
+    if (config.trim) {
+      updateTask(taskId, { current_step: "裁剪视频..." });
+      const trimmedPath = path.join(TEMP_DIR, `${taskId}-trimmed.mp4`);
+      const { spawn } = await import("child_process");
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn("ffmpeg", [
+          "-y", "-i", videoPath,
+          "-ss", config.trim!.start.toString(),
+          "-to", config.trim!.end.toString(),
+          "-c", "copy",
+          "-avoid_negative_ts", "make_zero",
+          trimmedPath,
+        ], { stdio: ["pipe", "pipe", "pipe"] });
+        let stderr = "";
+        proc.stderr.on("data", (c: Buffer) => { stderr += c.toString(); });
+        proc.on("close", (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`FFmpeg trim failed: ${stderr.slice(-300)}`));
+        });
+      });
+      videoPath = trimmedPath;
+    }
+
     // === Step 1: Transcribe ===
     updateTask(taskId, { status: "transcribing", progress: 5, current_step: "Transcribing audio..." });
 
-    const transcriptPath = await transcribeVideo(task.filepath, taskId, (data) => {
+    const transcriptPath = await transcribeVideo(videoPath, taskId, (data) => {
       const pct = Math.min(Math.floor(data.progress * 0.3), 30);
       updateTask(taskId, { progress: pct, current_step: "Transcribing audio..." });
     });
@@ -143,7 +168,7 @@ async function processTask(taskId: string) {
 
       updateTask(taskId, { status: "processing", progress: 55, current_step: "Cleaning video..." });
       const cleanedPath = await cleanVideo(
-        task.filepath,
+        videoPath,
         analysis.segments,
         taskId,
         config.burn_subtitles,
@@ -167,7 +192,7 @@ async function processTask(taskId: string) {
         const pct = 75 + Math.floor((i / highlights.clips.length) * 20);
         updateTask(taskId, { progress: pct, current_step: `Cutting clip ${i + 1}/${highlights.clips.length}...` });
 
-        const clipPath = await extractClip(task.filepath, clip, taskId, i);
+        const clipPath = await extractClip(videoPath, clip, taskId, i);
 
         // Generate subtitle for this clip
         const clipSrtPath = path.join(OUTPUTS_DIR, `${taskId}-clip${i}.srt`);

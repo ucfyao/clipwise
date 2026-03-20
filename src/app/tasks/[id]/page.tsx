@@ -69,7 +69,7 @@ export default function TaskPage() {
     return (
       <div className="flex flex-col items-center gap-3 py-16">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-        <p className="text-sm text-muted-foreground">Loading task...</p>
+        <p className="text-sm text-muted-foreground">加载中...</p>
       </div>
     );
   }
@@ -96,7 +96,7 @@ export default function TaskPage() {
           {/* Cleaned video */}
           {result.cleaned_video && (
             <section className="space-y-4">
-              <h2 className="text-xl font-semibold">Cleaned Video</h2>
+              <h2 className="text-xl font-semibold">清理后的视频</h2>
               <VideoPlayer src={`/api/tasks/${taskId}/download?type=cleaned`} />
               <div className="flex gap-3">
                 <a
@@ -104,7 +104,7 @@ export default function TaskPage() {
                   download
                   className={cn(buttonVariants())}
                 >
-                  Download Video
+                  下载视频
                 </a>
                 {result.subtitle_file && (
                   <a
@@ -112,7 +112,7 @@ export default function TaskPage() {
                     download
                     className={cn(buttonVariants({ variant: "outline" }))}
                   >
-                    Download Subtitles
+                    下载字幕
                   </a>
                 )}
               </div>
@@ -122,7 +122,7 @@ export default function TaskPage() {
           {/* Clips */}
           {result.clips && result.clips.length > 0 && (
             <section className="space-y-4">
-              <h2 className="text-xl font-semibold">Highlight Clips ({result.clips.length})</h2>
+              <h2 className="text-xl font-semibold">精华片段（{result.clips.length}）</h2>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 {result.clips.map((clip, i) => (
                   <ClipCard
@@ -145,13 +145,13 @@ export default function TaskPage() {
               download
               className={cn(buttonVariants({ size: "lg" }))}
             >
-              Download All (ZIP)
+              下载全部 (ZIP)
             </a>
             <Link
               href="/"
               className={cn(buttonVariants({ variant: "outline", size: "lg" }))}
             >
-              New Task
+              新任务
             </Link>
           </div>
         </div>

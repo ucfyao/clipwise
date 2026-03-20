@@ -12,7 +12,7 @@ interface TaskState {
   error?: string | null;
 }
 
-const steps = ["Transcribing", "Analyzing", "Processing", "Done"];
+const steps = ["转录中", "分析中", "处理中", "完成"];
 
 function getStepIndex(status: string): number {
   switch (status) {
@@ -60,9 +60,9 @@ export function ProgressDisplay({ taskId }: { taskId: string }) {
           const totalEstimate = elapsed / (progress / 100);
           const remaining = Math.max(0, totalEstimate - elapsed);
           if (remaining < 60) {
-            setEta(`~${Math.ceil(remaining)}s remaining`);
+            setEta(`~${Math.ceil(remaining)}s 剩余`);
           } else {
-            setEta(`~${Math.ceil(remaining / 60)}min remaining`);
+            setEta(`~${Math.ceil(remaining / 60)}min 剩余`);
           }
         }
       } catch {}
@@ -76,7 +76,7 @@ export function ProgressDisplay({ taskId }: { taskId: string }) {
     return (
       <div className="flex flex-col items-center gap-3 py-8">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-        <p className="text-sm text-muted-foreground">Connecting...</p>
+        <p className="text-sm text-muted-foreground">连接中...</p>
       </div>
     );
   }
@@ -84,7 +84,7 @@ export function ProgressDisplay({ taskId }: { taskId: string }) {
   if (task.status === "failed") {
     return (
       <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-6 text-center">
-        <p className="text-sm font-medium text-destructive">Task Failed</p>
+        <p className="text-sm font-medium text-destructive">任务失败</p>
         <p className="mt-2 text-sm text-muted-foreground">{task.error}</p>
         <Button
           variant="outline"
@@ -95,7 +95,7 @@ export function ProgressDisplay({ taskId }: { taskId: string }) {
             window.location.reload();
           }}
         >
-          Retry
+          重试
         </Button>
       </div>
     );

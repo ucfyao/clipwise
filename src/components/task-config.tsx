@@ -24,9 +24,9 @@ interface TaskConfigProps {
 }
 
 const modes: { value: TaskMode; label: string; desc: string }[] = [
-  { value: "clean", label: "Clean", desc: "Remove silence & fillers" },
-  { value: "highlights", label: "Highlights", desc: "Extract short clips" },
-  { value: "both", label: "Both", desc: "Clean + extract clips" },
+  { value: "clean", label: "清理", desc: "去除静音和口误" },
+  { value: "highlights", label: "精华", desc: "提取短视频片段" },
+  { value: "both", label: "全部", desc: "清理 + 提取短视频" },
 ];
 
 export function TaskConfigPanel({ mode, setMode, config, setConfig }: TaskConfigProps) {
@@ -64,13 +64,13 @@ export function TaskConfigPanel({ mode, setMode, config, setConfig }: TaskConfig
         >
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
         </svg>
-        Advanced Settings
+        高级设置
       </button>
 
       {open && (
         <div className="space-y-4 rounded-lg border border-border bg-card p-4">
           <div className="space-y-2">
-            <Label>Silence Threshold: {config.silence_threshold}s</Label>
+            <Label>静音阈值：{config.silence_threshold}s</Label>
             <Slider
               value={[config.silence_threshold]}
               onValueChange={([v]) => setConfig({ ...config, silence_threshold: v })}
@@ -81,7 +81,7 @@ export function TaskConfigPanel({ mode, setMode, config, setConfig }: TaskConfig
           </div>
 
           <div className="flex items-center justify-between">
-            <Label>Keep Fillers</Label>
+            <Label>保留口误</Label>
             <Switch
               checked={config.keep_fillers}
               onCheckedChange={(v) => setConfig({ ...config, keep_fillers: v })}
@@ -89,7 +89,7 @@ export function TaskConfigPanel({ mode, setMode, config, setConfig }: TaskConfig
           </div>
 
           <div className="space-y-2">
-            <Label>Subtitle Style</Label>
+            <Label>字幕样式</Label>
             <Select
               value={config.subtitle_style}
               onValueChange={(v) => setConfig({ ...config, subtitle_style: v as "default" | "large-center" })}
@@ -98,14 +98,14 @@ export function TaskConfigPanel({ mode, setMode, config, setConfig }: TaskConfig
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="default">Default</SelectItem>
-                <SelectItem value="large-center">Large Center</SelectItem>
+                <SelectItem value="default">默认</SelectItem>
+                <SelectItem value="large-center">大字居中</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           <div className="flex items-center justify-between">
-            <Label>Burn Subtitles</Label>
+            <Label>烧录字幕</Label>
             <Switch
               checked={config.burn_subtitles}
               onCheckedChange={(v) => setConfig({ ...config, burn_subtitles: v })}

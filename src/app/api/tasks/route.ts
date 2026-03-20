@@ -11,13 +11,13 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { filename, filepath, mode = "both", config } = body;
+  const { filename, filepath, mode = "both", config, trim } = body;
 
   if (!filename || !filepath) {
     return NextResponse.json({ error: "filename and filepath required" }, { status: 400 });
   }
 
-  const taskConfig: TaskConfig = { ...DEFAULT_CONFIG, ...config };
+  const taskConfig: TaskConfig = { ...DEFAULT_CONFIG, ...config, ...(trim ? { trim } : {}) };
   const taskId = await createTask(filename, filepath, mode, taskConfig);
 
   return NextResponse.json({ id: taskId });

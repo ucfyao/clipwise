@@ -34,7 +34,7 @@ export default function TasksPage() {
     return (
       <div className="flex flex-col items-center gap-3 py-16">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-        <p className="text-sm text-muted-foreground">Loading...</p>
+        <p className="text-sm text-muted-foreground">加载中...</p>
       </div>
     );
   }
@@ -42,20 +42,20 @@ export default function TasksPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Tasks</h1>
+        <h1 className="text-2xl font-bold">任务列表</h1>
         <Link
           href="/"
           className="text-sm text-primary hover:underline"
         >
-          + New Task
+          + 新任务
         </Link>
       </div>
 
       {tasks.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-12 text-center">
-          <p className="text-muted-foreground">No tasks yet.</p>
+          <p className="text-muted-foreground">还没有任务</p>
           <Link href="/" className="mt-2 inline-block text-sm text-primary hover:underline">
-            Upload a video to get started
+            上传视频开始使用
           </Link>
         </div>
       ) : (

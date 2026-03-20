@@ -14,6 +14,8 @@ interface UploadResult {
 
 interface UploadZoneProps {
   onUpload: (result: UploadResult) => void;
+  onDurationDetected?: (duration: number) => void;
+  onPreviewReady?: (url: string) => void;
 }
 
 function formatSize(bytes: number): string {
@@ -30,7 +32,7 @@ function formatDuration(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function UploadZone({ onUpload }: UploadZoneProps) {
+export function UploadZone({ onUpload, onDurationDetected, onPreviewReady }: UploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -54,12 +56,12 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
     setError(null);
 
     if (!file.type.startsWith("video/")) {
-      setError("Please upload a video file");
+      setError("请上传视频文件");
       return;
     }
 
     if (file.size > MAX_FILE_SIZE) {
-      setError("File too large (max 2GB)");
+      setError("文件过大（最大 2GB）");
       return;
     }
 
@@ -70,6 +72,7 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
     // Create preview URL
     const url = URL.createObjectURL(file);
     setPreviewUrl(url);
+    onPreviewReady?.(url);
 
     try {
       const formData = new FormData();
@@ -87,10 +90,10 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
           if (xhr.status === 200) {
             resolve(JSON.parse(xhr.responseText));
           } else {
-            reject(new Error(JSON.parse(xhr.responseText).error || "Upload failed"));
+            reject(new Error(JSON.parse(xhr.responseText).error || "上传失败"));
           }
         };
-        xhr.onerror = () => reject(new Error("Network error"));
+        xhr.onerror = () => reject(new Error("网络错误"));
         xhr.open("POST", "/api/upload");
         xhr.send(formData);
       });
@@ -98,7 +101,7 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
       setUploadedFile(result.filename);
       onUpload(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
+      setError(err instanceof Error ? err.message : "上传失败");
       setPreviewUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
     } finally {
       setUploading(false);
@@ -122,7 +125,10 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
           controls
           className="w-full rounded-lg bg-black"
           onLoadedMetadata={() => {
-            if (videoRef.current) setDuration(videoRef.current.duration);
+            if (videoRef.current) {
+              setDuration(videoRef.current.duration);
+              onDurationDetected?.(videoRef.current.duration);
+            }
           }}
         />
         <div className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3">
@@ -134,7 +140,7 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
             </p>
           </div>
           <Button variant="ghost" size="sm" onClick={reset}>
-            Change
+            更换
           </Button>
         </div>
       </div>
@@ -166,7 +172,7 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
 
       {uploading ? (
         <div className="flex w-full max-w-xs flex-col items-center gap-3">
-          <p className="text-sm text-muted-foreground">Uploading...</p>
+          <p className="text-sm text-muted-foreground">上传中...</p>
           <Progress value={progress} className="w-full" />
           <p className="text-xs text-muted-foreground">{progress}%</p>
         </div>
@@ -175,8 +181,8 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
           <svg className="mb-3 h-10 w-10 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
           </svg>
-          <p className="text-sm font-medium">Drop video here or click to browse</p>
-          <p className="mt-1 text-xs text-muted-foreground">MP4, MOV, MKV, WebM, AVI — Max 2GB, 90 minutes</p>
+          <p className="text-sm font-medium">拖拽视频到这里，或点击选择</p>
+          <p className="mt-1 text-xs text-muted-foreground">MP4, MOV, MKV, WebM, AVI — 最大 2GB，90 分钟</p>
         </>
       )}
 

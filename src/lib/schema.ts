@@ -21,6 +21,7 @@ export interface TaskConfig {
   keep_fillers: boolean;
   subtitle_style: "default" | "large-center";
   burn_subtitles: boolean;
+  trim?: { start: number; end: number };
 }
 
 export interface TaskResult {
