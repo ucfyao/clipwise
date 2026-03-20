@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# clipwise data
+data/
+clipwise.db
+
+# python
+worker/.venv/
+__pycache__/
