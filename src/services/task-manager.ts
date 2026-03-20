@@ -8,7 +8,8 @@ import { transcribeVideo } from "./transcribe";
 import { analyzeTranscript, analyzeTranscriptBasic, AnalysisResult } from "./analyze";
 import { extractHighlights } from "./extract";
 import { cleanVideo, extractClip } from "./ffmpeg";
-import { generateSRT } from "./subtitle";
+import { generateSRT, generateAnimatedASS } from "./subtitle";
+import { generateCopy } from "./copywriter";
 
 // Ensure data directories exist
 async function ensureDirs() {
@@ -164,7 +165,11 @@ async function processTask(taskId: string) {
 
       updateTask(taskId, { progress: 50, current_step: "Generating subtitles..." });
       const srtPath = await generateSRT(analysis.segments, path.join(OUTPUTS_DIR, `${taskId}.srt`));
-      result.subtitle_file = srtPath;
+      result.srt_file = srtPath;
+
+      // Also generate animated ASS subtitle
+      const assPath = await generateAnimatedASS(transcriptPath, path.join(OUTPUTS_DIR, `${taskId}.ass`), config.subtitle_style);
+      result.subtitle_file = assPath; // Prefer ASS over SRT
 
       updateTask(taskId, { status: "processing", progress: 55, current_step: "Cleaning video..." });
       const cleanedPath = await cleanVideo(
@@ -211,6 +216,20 @@ async function processTask(taskId: string) {
           duration: clip.end - clip.start,
           score: clip.score,
         });
+      }
+
+      // Generate platform-specific copy for each clip
+      if (hasApiKeyForHighlights) {
+        updateTask(taskId, { progress: 93, current_step: "生成发布文案..." });
+        try {
+          const copy = await generateCopy(
+            highlights.clips.map(c => ({ title: c.title, start: c.start, end: c.end, reason: c.reason })),
+            task.filename
+          );
+          result.copy = copy;
+        } catch {
+          // Non-critical — continue without copy
+        }
       }
     }
 

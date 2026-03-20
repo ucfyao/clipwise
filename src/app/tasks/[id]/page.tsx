@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ProgressDisplay } from "@/components/progress-display";
 import { VideoPlayer } from "@/components/video-player";
 import { ClipCard } from "@/components/clip-card";
+import { CopyPanel } from "@/components/copy-panel";
 import { buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -30,6 +31,15 @@ interface TaskResult {
     subtitle_file: string;
     duration: number;
     score: number;
+  }>;
+  copy?: Array<{
+    clip_title: string;
+    platforms: Array<{
+      platform: string;
+      title: string;
+      description: string;
+      hashtags: string[];
+    }>;
   }>;
 }
 
@@ -136,6 +146,11 @@ export default function TaskPage() {
                 ))}
               </div>
             </section>
+          )}
+
+          {/* Copy panel */}
+          {result.copy && result.copy.length > 0 && (
+            <CopyPanel copies={result.copy} />
           )}
 
           {/* Actions */}

@@ -26,13 +26,23 @@ export interface TaskConfig {
 
 export interface TaskResult {
   cleaned_video?: string;
-  subtitle_file?: string;
+  subtitle_file?: string; // ASS file (animated)
+  srt_file?: string;      // SRT file (plain)
   clips?: Array<{
     title: string;
     filepath: string;
     subtitle_file: string;
     duration: number;
     score: number;
+  }>;
+  copy?: Array<{
+    clip_title: string;
+    platforms: Array<{
+      platform: string;
+      title: string;
+      description: string;
+      hashtags: string[];
+    }>;
   }>;
 }
 
