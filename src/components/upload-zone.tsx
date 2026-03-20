@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024;
@@ -15,13 +16,39 @@ interface UploadZoneProps {
   onUpload: (result: UploadResult) => void;
 }
 
+function formatSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 export function UploadZone({ onUpload }: UploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [uploadedFile, setUploadedFile] = useState<string | null>(null);
+  const [fileSize, setFileSize] = useState<number>(0);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [duration, setDuration] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const reset = useCallback(() => {
+    setUploadedFile(null);
+    setPreviewUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
+    setDuration(null);
+    setFileSize(0);
+    setError(null);
+  }, []);
 
   const handleFile = useCallback(async (file: File) => {
     setError(null);
@@ -38,6 +65,11 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
 
     setUploading(true);
     setProgress(0);
+    setFileSize(file.size);
+
+    // Create preview URL
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
 
     try {
       const formData = new FormData();
@@ -67,6 +99,7 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
       onUpload(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
+      setPreviewUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
     } finally {
       setUploading(false);
     }
@@ -78,6 +111,35 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
     const file = e.dataTransfer.files[0];
     if (file) handleFile(file);
   }, [handleFile]);
+
+  // After upload success — show preview + file info
+  if (uploadedFile && previewUrl) {
+    return (
+      <div className="w-full space-y-3">
+        <video
+          ref={videoRef}
+          src={previewUrl}
+          controls
+          className="w-full rounded-lg bg-black"
+          onLoadedMetadata={() => {
+            if (videoRef.current) setDuration(videoRef.current.duration);
+          }}
+        />
+        <div className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium">{uploadedFile}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {formatSize(fileSize)}
+              {duration !== null && ` · ${formatDuration(duration)}`}
+            </p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={reset}>
+            Change
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -102,14 +164,7 @@ export function UploadZone({ onUpload }: UploadZoneProps) {
         }}
       />
 
-      {uploadedFile ? (
-        <div className="flex items-center gap-2 text-green-500">
-          <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-          <span className="text-sm font-medium">{uploadedFile}</span>
-        </div>
-      ) : uploading ? (
+      {uploading ? (
         <div className="flex w-full max-w-xs flex-col items-center gap-3">
           <p className="text-sm text-muted-foreground">Uploading...</p>
           <Progress value={progress} className="w-full" />
