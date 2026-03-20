@@ -16,14 +16,15 @@ interface TaskConfig {
 const DEFAULT_CONFIG: TaskConfig = {
   silence_threshold: 3,
   keep_fillers: false,
-  subtitle_style: "default",
+  subtitle_style: "default" as const,
   burn_subtitles: false,
 };
+
 
 export default function Home() {
   const router = useRouter();
   const [uploadResult, setUploadResult] = useState<{ filename: string; filepath: string } | null>(null);
-  const [config, setConfig] = useState(DEFAULT_CONFIG);
+  const [config, setConfig] = useState<TaskConfig>(DEFAULT_CONFIG);
   const [mode, setMode] = useState<"clean" | "highlights" | "both">("both");
   const [loading, setLoading] = useState(false);
 
