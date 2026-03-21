@@ -47,3 +47,6 @@ clipwise.db
 # python
 worker/.venv/
 __pycache__/
+
+# worktrees
+.worktrees/
