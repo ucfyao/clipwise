@@ -41,8 +41,10 @@ function Home() {
     setClientLogs((prev) => [...prev, { timestamp, level, message: `[${timestamp}] ${message}` }]);
   }, []);
 
+  // Connect SSE whenever we have a taskId and status isn't idle/uploaded
+  const sseActive = taskId && (pageStatus === "processing" || pageStatus === "failed");
   const { task, segments, clips, logs, reset: resetSSE } = useTaskSSE(
-    pageStatus === "processing" ? taskId : null
+    sseActive ? taskId : null
   );
 
   // Merge client-side logs with SSE logs

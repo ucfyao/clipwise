@@ -86,10 +86,12 @@ Requirements:
  */
 function detectSilenceFFmpeg(videoPath: string, silenceThreshold: number): Promise<Array<{ start: number; end: number }>> {
   return new Promise((resolve, reject) => {
-    // Convert threshold in seconds to dB noise floor
-    // silenceThreshold controls minimum duration, noise floor is fixed at -30dB
-    const noisedB = "-30dB";
-    const minDuration = Math.max(silenceThreshold, 0.3);
+    // silenceThreshold controls minimum duration
+    // -20dB is a good noise floor for typical recordings with some background noise
+    // -30dB is too sensitive (misses silence in noisy recordings)
+    // -20dB catches pauses even with ambient noise
+    const noisedB = "-20dB";
+    const minDuration = Math.max(silenceThreshold * 0.3, 0.3); // Use 30% of user threshold as min duration for more aggressive detection
 
     console.log(`[silencedetect] Running: noise=${noisedB}, min_duration=${minDuration}s`);
 
