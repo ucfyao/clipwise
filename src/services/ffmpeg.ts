@@ -1,6 +1,7 @@
 import { spawn } from "child_process";
 import path from "path";
 import { OUTPUTS_DIR } from "@/lib/constants";
+import { TaskConfig } from "@/lib/schema";
 import { Segment } from "./analyze";
 import { Clip } from "./extract";
 import fs from "fs/promises";
@@ -22,6 +23,43 @@ function runFFmpeg(args: string[]): Promise<void> {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Enhancement filter builder
+// ---------------------------------------------------------------------------
+
+interface EnhancementFilters {
+  audioFilters: string[];
+  videoFilters: string[];
+}
+
+function buildEnhancementFilters(config: TaskConfig): EnhancementFilters {
+  const audioFilters: string[] = [];
+  const videoFilters: string[] = [];
+
+  // Denoise (applied first — values calibrated to avoid artifacts)
+  if (config.denoise !== "off") {
+    const nfMap = { light: -20, medium: -30, strong: -40 } as const;
+    audioFilters.push(`afftdn=nf=${nfMap[config.denoise]}`);
+  }
+
+  // Normalize (after denoise) — single-pass loudnorm, acceptable quality
+  if (config.normalize_audio) {
+    audioFilters.push("loudnorm=I=-16:TP=-1.5:LRA=11");
+  }
+
+  // Speed
+  if (config.speed !== 1) {
+    videoFilters.push(`setpts=PTS/${config.speed}`);
+    audioFilters.push(`atempo=${config.speed}`);
+  }
+
+  return { audioFilters, videoFilters };
+}
+
+// ---------------------------------------------------------------------------
+// cleanVideo — trim/concat + optional enhancements
+// ---------------------------------------------------------------------------
+
 /**
  * Remove silence/filler segments using trim/atrim + concat filter_complex.
  * Single FFmpeg command, no temp files, frame-accurate cuts.
@@ -31,7 +69,8 @@ export async function cleanVideo(
   segments: Segment[],
   taskId: string,
   burnSubtitles: boolean,
-  srtPath?: string
+  srtPath?: string,
+  config?: TaskConfig
 ): Promise<string> {
   const keepSegments = segments.filter((s) => s.type === "keep");
   if (!keepSegments.length) throw new Error("No segments to keep");
@@ -59,21 +98,67 @@ export async function cleanVideo(
     `${concatInputs.join("")}concat=n=${keepSegments.length}:v=1:a=1[outv][outa]`
   );
 
-  let filterComplex = filterParts.join(";");
+  // --- Enhancement filters ---
+  const { audioFilters, videoFilters } = config
+    ? buildEnhancementFilters(config)
+    : { audioFilters: [] as string[], videoFilters: [] as string[] };
 
-  // Optionally burn subtitles on the concatenated output
-  if (burnSubtitles && srtPath) {
-    const escapedSrt = srtPath.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "'\\''");
-    filterComplex += `;[outv]subtitles='${escapedSrt}'[finalv]`;
+  const fadeConfig = config?.fade;
+  const speed = config?.speed ?? 1;
+
+  // Compute total duration for fade (after speed adjustment)
+  const totalDuration =
+    keepSegments.reduce((sum, s) => sum + (s.end - s.start), 0) / (speed || 1);
+
+  // Build fade filters (applied last)
+  const videoFadeFilters: string[] = [];
+  const audioFadeFilters: string[] = [];
+  if (fadeConfig?.enabled && fadeConfig.duration > 0) {
+    const d = fadeConfig.duration;
+    videoFadeFilters.push(`fade=t=in:d=${d},fade=t=out:st=${(totalDuration - d).toFixed(3)}:d=${d}`);
+    audioFadeFilters.push(`afade=t=in:d=${d},afade=t=out:st=${(totalDuration - d).toFixed(3)}:d=${d}`);
   }
 
-  const mapVideo = burnSubtitles && srtPath ? "[finalv]" : "[outv]";
+  // --- Video chain ---
+  // Start label after concat is [outv]
+  let currentVideoLabel = "outv";
+
+  // 1. Subtitles (if enabled)
+  if (burnSubtitles && srtPath) {
+    const escapedSrt = srtPath.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "'\\''");
+    const nextLabel = "subv";
+    filterParts.push(`[${currentVideoLabel}]subtitles='${escapedSrt}'[${nextLabel}]`);
+    currentVideoLabel = nextLabel;
+  }
+
+  // 2. Video enhancement filters + fade
+  const allVideoFilters = [...videoFilters, ...videoFadeFilters];
+  if (allVideoFilters.length > 0) {
+    const nextLabel = "enhv";
+    filterParts.push(
+      `[${currentVideoLabel}]${allVideoFilters.join(",")}[${nextLabel}]`
+    );
+    currentVideoLabel = nextLabel;
+  }
+
+  // --- Audio chain ---
+  let currentAudioLabel = "outa";
+  const allAudioFilters = [...audioFilters, ...audioFadeFilters];
+  if (allAudioFilters.length > 0) {
+    const nextLabel = "enha";
+    filterParts.push(
+      `[${currentAudioLabel}]${allAudioFilters.join(",")}[${nextLabel}]`
+    );
+    currentAudioLabel = nextLabel;
+  }
+
+  const filterComplex = filterParts.join(";");
 
   await runFFmpeg([
     "-i", inputPath,
     "-filter_complex", filterComplex,
-    "-map", mapVideo,
-    "-map", "[outa]",
+    "-map", `[${currentVideoLabel}]`,
+    "-map", `[${currentAudioLabel}]`,
     "-c:v", "h264_videotoolbox", "-q:v", "65",
     "-c:a", "aac", "-b:a", "128k",
     outputPath,
@@ -86,31 +171,70 @@ export async function cleanVideo(
   return outputPath;
 }
 
+// ---------------------------------------------------------------------------
+// extractClip — precise cut + vertical crop + optional enhancements
+// ---------------------------------------------------------------------------
+
 export async function extractClip(
   inputPath: string,
   clip: Clip,
   taskId: string,
-  clipIndex: number
+  clipIndex: number,
+  config?: TaskConfig
 ): Promise<string> {
   const outputPath = path.join(OUTPUTS_DIR, `${taskId}-clip${clipIndex}.mp4`);
 
-  // Re-encode for precise cut
-  await runFFmpeg([
+  const { audioFilters, videoFilters } = config
+    ? buildEnhancementFilters(config)
+    : { audioFilters: [] as string[], videoFilters: [] as string[] };
+
+  const fadeConfig = config?.fade;
+  const speed = config?.speed ?? 1;
+
+  // Compute clip duration after speed adjustment
+  const clipDuration = (clip.end - clip.start) / (speed || 1);
+
+  // Build fade filters
+  const videoFadeFilters: string[] = [];
+  const audioFadeFilters: string[] = [];
+  if (fadeConfig?.enabled && fadeConfig.duration > 0) {
+    const d = fadeConfig.duration;
+    videoFadeFilters.push(`fade=t=in:d=${d},fade=t=out:st=${(clipDuration - d).toFixed(3)}:d=${d}`);
+    audioFadeFilters.push(`afade=t=in:d=${d},afade=t=out:st=${(clipDuration - d).toFixed(3)}:d=${d}`);
+  }
+
+  // --- First call: re-encode with audio enhancements ---
+  const firstCallArgs = [
     "-i", inputPath,
     "-ss", clip.start.toString(),
     "-to", clip.end.toString(),
     "-c:v", "h264_videotoolbox", "-q:v", "65",
-    "-c:a", "aac", "-b:a", "128k",
-    outputPath,
-  ]);
+  ];
 
+  const allAudioFilters = [...audioFilters, ...audioFadeFilters];
+  if (allAudioFilters.length > 0) {
+    firstCallArgs.push("-af", allAudioFilters.join(","));
+  }
+
+  firstCallArgs.push("-c:a", "aac", "-b:a", "128k");
+  firstCallArgs.push(outputPath);
+
+  await runFFmpeg(firstCallArgs);
+
+  // --- Second call: vertical crop + video enhancements ---
   const croppedPath = path.join(OUTPUTS_DIR, `${taskId}-clip${clipIndex}-vertical.mp4`);
-  await runFFmpeg([
+
+  const allVideoFilters = ["crop=ih*9/16:ih", ...videoFilters, ...videoFadeFilters];
+  const secondCallArgs = [
     "-i", outputPath,
-    "-vf", "crop=ih*9/16:ih",
-    "-c:a", "copy",
-    croppedPath,
-  ]);
+    "-vf", allVideoFilters.join(","),
+  ];
+
+  // If audio filters were applied in step 1, audio is already re-encoded; copy it
+  secondCallArgs.push("-c:a", "copy");
+  secondCallArgs.push(croppedPath);
+
+  await runFFmpeg(secondCallArgs);
 
   await fs.unlink(outputPath).catch(() => {});
   await fs.rename(croppedPath, outputPath);

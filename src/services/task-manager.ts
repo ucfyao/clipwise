@@ -272,7 +272,8 @@ async function processTask(taskId: string) {
         analysis.segments,
         taskId,
         config.burn_subtitles,
-        srtPath
+        srtPath,
+        config
       );
       result.cleaned_video = cleanedPath;
       taskLog(taskId, `Video cleaned: ${cleanedPath}`);
@@ -304,7 +305,7 @@ async function processTask(taskId: string) {
         const pct = 75 + Math.floor((i / highlights.clips.length) * 20);
         updateTask(taskId, { progress: pct, current_step: `Cutting clip ${i + 1}/${highlights.clips.length}...` });
 
-        const clipPath = await extractClip(videoPath, clip, taskId, i);
+        const clipPath = await extractClip(videoPath, clip, taskId, i, config);
 
         // Generate subtitle for this clip
         const clipSrtPath = path.join(OUTPUTS_DIR, `${taskId}-clip${i}.srt`);
