@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import fs from "fs/promises";
 import path from "path";
-import { getDb } from "@/lib/db";
+import { getTaskById, insertTask, updateTaskFields, listTasks as dbListTasks, deleteTask as dbDeleteTask } from "@/lib/db";
 import { Task, TaskConfig, TaskResult, DEFAULT_CONFIG } from "@/lib/schema";
 import { UPLOADS_DIR, TRANSCRIPTS_DIR, OUTPUTS_DIR, TEMP_DIR } from "@/lib/constants";
 import { transcribeVideo } from "./transcribe";
@@ -44,30 +44,21 @@ function notifyListeners(taskId: string, data: object) {
   }
 }
 
-// --- DB helpers ---
+// --- Task helpers ---
 function updateTask(id: string, updates: Partial<Task>) {
-  const db = getDb();
-  const sets: string[] = [];
-  const values: unknown[] = [];
-
-  for (const [key, value] of Object.entries(updates)) {
-    sets.push(`${key} = ?`);
-    values.push(value);
-  }
-  sets.push("updated_at = datetime('now')");
-  values.push(id);
-
-  db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+  updateTaskFields(id, updates);
   notifyListeners(id, { ...updates, id });
 }
 
 export function getTask(id: string): Task | undefined {
-  return getDb().prepare("SELECT * FROM tasks WHERE id = ?").get(id) as Task | undefined;
+  return getTaskById(id);
 }
 
 export function listTasks(): Task[] {
-  return getDb().prepare("SELECT * FROM tasks ORDER BY created_at DESC").all() as Task[];
+  return dbListTasks();
 }
+
+export { dbDeleteTask as deleteTask };
 
 // --- Task lifecycle ---
 export async function createTask(
@@ -78,13 +69,26 @@ export async function createTask(
 ): Promise<string> {
   await ensureDirs();
   const id = randomUUID();
-  const db = getDb();
+  const now = new Date().toISOString();
 
-  db.prepare(
-    `INSERT INTO tasks (id, filename, filepath, mode, config) VALUES (?, ?, ?, ?, ?)`
-  ).run(id, filename, filepath, mode, JSON.stringify(config));
+  const task: Task = {
+    id,
+    filename,
+    filepath,
+    mode: mode as Task["mode"],
+    status: "pending",
+    progress: 0,
+    current_step: "",
+    config: JSON.stringify(config),
+    result: null,
+    error: null,
+    created_at: now,
+    updated_at: now,
+  };
 
-  // Fire and forget — errors are caught and stored in DB
+  insertTask(task);
+
+  // Fire and forget — errors are caught and stored
   processTask(id).catch((err) => {
     console.error(`Task ${id} failed:`, err);
     updateTask(id, { status: "failed", error: err.message });
@@ -103,8 +107,7 @@ export async function retryTask(id: string) {
 // --- Processing pipeline ---
 // Progress mapping: 0-30% transcription, 30-50% analysis, 50-75% FFmpeg clean, 75-95% clips, 95-100% done
 async function processTask(taskId: string) {
-  const db = getDb();
-  const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as Task;
+  const task = getTaskById(taskId);
   if (!task) throw new Error("Task not found");
 
   const config: TaskConfig = JSON.parse(task.config);
@@ -137,11 +140,16 @@ async function processTask(taskId: string) {
     }
 
     // === Step 1: Transcribe ===
-    updateTask(taskId, { status: "transcribing", progress: 5, current_step: "Transcribing audio..." });
+    updateTask(taskId, { status: "transcribing", progress: 5, current_step: "准备转录..." });
 
     const transcriptPath = await transcribeVideo(videoPath, taskId, (data) => {
-      const pct = Math.min(Math.floor(data.progress * 0.3), 30);
-      updateTask(taskId, { progress: pct, current_step: "Transcribing audio..." });
+      const message = (data.message as string) || "转录中...";
+      if (data.step === "downloading_model") {
+        updateTask(taskId, { progress: Math.min(Math.floor(data.progress * 0.25), 25), current_step: message });
+      } else {
+        const pct = Math.min(Math.floor(data.progress * 0.3), 30);
+        updateTask(taskId, { progress: pct, current_step: message });
+      }
     });
 
     // === Step 2: Feature A — Clean ===
