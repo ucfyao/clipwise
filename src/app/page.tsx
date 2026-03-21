@@ -8,7 +8,7 @@ import { ProcessingPanel } from "@/components/processing-panel";
 import { ResultPanel } from "@/components/result-panel";
 import { Timeline } from "@/components/timeline";
 import { SettingsDrawer } from "@/components/settings-drawer";
-import { useTaskSSE } from "@/hooks/use-task-sse";
+import { useTaskSSE, type LogEntry } from "@/hooks/use-task-sse";
 import { LogTerminal } from "@/components/log-terminal";
 import { Button } from "@/components/ui/button";
 import { Scissors, Sparkles, Wand2 } from "lucide-react";
@@ -33,11 +33,20 @@ function Home() {
   const [keepFillers, setKeepFillers] = useState(false);
   const [subtitleStyle, setSubtitleStyle] = useState<"default" | "large-center">("default");
   const [burnSubtitles, setBurnSubtitles] = useState(false);
+  const [clientLogs, setClientLogs] = useState<LogEntry[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  const addLog = useCallback((message: string, level: "info" | "warn" | "error" = "info") => {
+    const timestamp = new Date().toISOString().slice(11, 23);
+    setClientLogs((prev) => [...prev, { timestamp, level, message: `[${timestamp}] ${message}` }]);
+  }, []);
 
   const { task, segments, clips, logs, reset: resetSSE } = useTaskSSE(
     pageStatus === "processing" ? taskId : null
   );
+
+  // Merge client-side logs with SSE logs
+  const localLogs = [...clientLogs, ...logs];
 
   useEffect(() => {
     if (task?.status === "completed" && pageStatus === "processing") {
@@ -52,6 +61,7 @@ function Home() {
   }, [task?.status, task?.result, pageStatus]);
 
   const handleFileReady = useCallback((data: { filename: string; filepath: string; previewUrl: string; duration: number }) => {
+    addLog(`文件已选择: ${data.filename}`);
     const video = document.createElement("video");
     video.preload = "metadata";
     video.onloadedmetadata = () => {
@@ -60,16 +70,22 @@ function Home() {
         resolution: `${video.videoWidth}x${video.videoHeight}`,
         size: "—",
       });
+      addLog(`视频信息: ${video.videoWidth}x${video.videoHeight}, ${Math.floor(data.duration)}s`);
+      addLog("准备就绪，等待开始处理");
       setPageStatus("uploaded");
     };
     video.src = data.previewUrl;
-  }, []);
+  }, [addLog]);
 
   const handleStart = useCallback(async () => {
     if (!videoInfo) return;
+    setClientLogs([]);
     resetSSE();
+    addLog(`开始处理: ${videoInfo.filename}`);
+    addLog(`模式: ${mode}, 静音阈值: ${silenceThreshold}s`);
 
     try {
+      addLog("创建任务...");
       const res = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -87,12 +103,15 @@ function Home() {
       });
       if (!res.ok) throw new Error("Failed to create task");
       const { id } = await res.json();
+      addLog(`任务已创建: ${id}`);
+      addLog("连接 SSE 实时日志流...");
       setTaskId(id);
       setPageStatus("processing");
     } catch {
+      addLog("任务创建失败", "error");
       setPageStatus("failed");
     }
-  }, [videoInfo, mode, silenceThreshold, keepFillers, subtitleStyle, burnSubtitles, resetSSE]);
+  }, [videoInfo, mode, silenceThreshold, keepFillers, subtitleStyle, burnSubtitles, resetSSE, addLog]);
 
   const handleReprocess = useCallback(() => {
     setPageStatus("uploaded");
@@ -338,12 +357,7 @@ function Home() {
             </div>
           )}
           {(pageStatus === "processing" || pageStatus === "failed") && (
-            <>
-              <ProcessingPanel task={task} segments={segments} />
-              <div className="flex-1 min-h-0 p-3 pt-0">
-                <LogTerminal logs={logs} />
-              </div>
-            </>
+            <ProcessingPanel task={task} segments={segments} />
           )}
           {pageStatus === "failed" && (
             <div className="p-4 border-t border-[#3a3a5a]">
@@ -363,6 +377,12 @@ function Home() {
               result={taskResult}
               onReprocess={handleReprocess}
             />
+          )}
+          {/* Log terminal — always visible except idle */}
+          {pageStatus !== "idle" && (
+            <div className="flex-1 min-h-0 p-3 pt-0">
+              <LogTerminal logs={localLogs} />
+            </div>
           )}
         </aside>
       </div>
