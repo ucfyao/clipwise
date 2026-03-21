@@ -1,289 +1,184 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { UploadZone } from "@/components/upload-zone";
-import { TaskConfigPanel } from "@/components/task-config";
-import { VideoTrimmer } from "@/components/video-trimmer";
-import { ProgressDisplay } from "@/components/progress-display";
-import { VideoPlayer } from "@/components/video-player";
-import { ClipCard } from "@/components/clip-card";
-import { CopyPanel } from "@/components/copy-panel";
+import { useState, useRef, useCallback, useEffect } from "react";
+import { FilePicker } from "@/components/file-picker";
+import { VideoPreview } from "@/components/video-preview";
+import { ConfigPanel } from "@/components/config-panel";
+import { ProcessingPanel } from "@/components/processing-panel";
+import { ResultPanel } from "@/components/result-panel";
+import { Timeline } from "@/components/timeline";
 import { SettingsDrawer } from "@/components/settings-drawer";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { useTaskSSE } from "@/hooks/use-task-sse";
+import { Button } from "@/components/ui/button";
+import type { PageStatus, TaskConfig, TaskMode, TaskResult } from "@/lib/schema";
 
-interface TaskConfig {
-  silence_threshold: number;
-  keep_fillers: boolean;
-  subtitle_style: "default" | "large-center";
-  burn_subtitles: boolean;
+interface VideoInfo {
+  filename: string;
+  filepath: string;
+  previewUrl: string;
+  duration: number;
+  resolution: string;
+  size: string;
 }
-
-const DEFAULT_CONFIG: TaskConfig = {
-  silence_threshold: 3,
-  keep_fillers: false,
-  subtitle_style: "default" as const,
-  burn_subtitles: false,
-};
-
-interface TaskResult {
-  cleaned_video?: string;
-  subtitle_file?: string;
-  srt_file?: string;
-  clips?: Array<{
-    title: string;
-    filepath: string;
-    subtitle_file: string;
-    duration: number;
-    score: number;
-  }>;
-  copy?: Array<{
-    clip_title: string;
-    platforms: Array<{
-      platform: string;
-      title: string;
-      description: string;
-      hashtags: string[];
-    }>;
-  }>;
-}
-
-type Step = "upload" | "config" | "processing" | "done" | "failed";
 
 export default function Home() {
-  const [step, setStep] = useState<Step>("upload");
-  const [uploadResult, setUploadResult] = useState<{ filename: string; filepath: string } | null>(null);
-  const [config, setConfig] = useState<TaskConfig>(DEFAULT_CONFIG);
-  const [mode, setMode] = useState<"clean" | "highlights" | "both">("both");
-  const [loading, setLoading] = useState(false);
-  const [videoDuration, setVideoDuration] = useState(0);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [trim, setTrim] = useState({ enabled: false, start: 0, end: 0 });
+  const [pageStatus, setPageStatus] = useState<PageStatus>("idle");
+  const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [taskResult, setTaskResult] = useState<TaskResult | null>(null);
-  const [taskError, setTaskError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Listen for task completion via SSE
+  const { task, segments, clips, reset: resetSSE } = useTaskSSE(
+    pageStatus === "processing" ? taskId : null
+  );
+
+  // Detect completion/failure from SSE — must be in useEffect, not render body
   useEffect(() => {
-    if (!taskId || step !== "processing") return;
+    if (task?.status === "completed" && pageStatus === "processing") {
+      setPageStatus("done");
+      if (task.result) {
+        try { setTaskResult(JSON.parse(task.result as string)); } catch {}
+      }
+    }
+    if (task?.status === "failed" && pageStatus === "processing") {
+      setPageStatus("failed");
+    }
+  }, [task?.status, task?.result, pageStatus]);
 
-    const evtSource = new EventSource(`/api/tasks/${taskId}/sse`);
-    evtSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.status === "completed") {
-          evtSource.close();
-          fetch(`/api/tasks/${taskId}`)
-            .then((res) => res.json())
-            .then((task) => {
-              setTaskResult(task.result ? JSON.parse(task.result) : null);
-              setStep("done");
-            });
-        } else if (data.status === "failed") {
-          evtSource.close();
-          setTaskError(data.error || "处理失败");
-          setStep("failed");
-        }
-      } catch {}
+  const handleFileReady = useCallback((data: { filename: string; filepath: string; previewUrl: string; duration: number }) => {
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      setVideoInfo({
+        ...data,
+        resolution: `${video.videoWidth}x${video.videoHeight}`,
+        size: "—",
+      });
+      setPageStatus("uploaded");
     };
-    evtSource.onerror = () => evtSource.close();
-    return () => evtSource.close();
-  }, [taskId, step]);
+    video.src = data.previewUrl;
+  }, []);
 
-  const handleUpload = (result: { filename: string; filepath: string }) => {
-    setUploadResult(result);
-    setStep("config");
-  };
+  const handleStart = useCallback(async (mode: TaskMode, config: TaskConfig) => {
+    if (!videoInfo) return;
+    resetSSE();
 
-  const handleStart = async () => {
-    if (!uploadResult) return;
-    setLoading(true);
     try {
       const res = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...uploadResult,
+          filename: videoInfo.filename,
+          filepath: videoInfo.filepath,
           mode,
           config,
-          trim: trim.enabled ? { start: trim.start, end: trim.end } : undefined,
         }),
       });
+      if (!res.ok) throw new Error("Failed to create task");
       const { id } = await res.json();
       setTaskId(id);
-      setStep("processing");
+      setPageStatus("processing");
     } catch {
-      setLoading(false);
+      setPageStatus("failed");
     }
-  };
+  }, [videoInfo, resetSSE]);
 
-  const handleReset = () => {
-    setStep("upload");
-    setUploadResult(null);
-    setConfig(DEFAULT_CONFIG);
-    setMode("both");
-    setLoading(false);
-    setVideoDuration(0);
-    setPreviewUrl(null);
-    setTrim({ enabled: false, start: 0, end: 0 });
-    setTaskId(null);
+  const handleReprocess = useCallback(() => {
+    setPageStatus("uploaded");
     setTaskResult(null);
-    setTaskError(null);
-  };
+    setTaskId(null);
+    resetSSE();
+  }, [resetSSE]);
 
-  const handleRetry = async () => {
-    if (!taskId) return;
-    setTaskError(null);
-    setStep("processing");
-    await fetch(`/api/tasks/${taskId}/retry`, { method: "POST" });
-  };
+  const handleChangeFile = useCallback(() => {
+    setPageStatus("idle");
+    setVideoInfo(null);
+    setTaskResult(null);
+    setTaskId(null);
+    resetSSE();
+  }, [resetSSE]);
+
+  const cleanedVideoUrl = taskResult?.cleaned_video
+    ? `/api/tasks/${taskId}/download?type=cleaned`
+    : undefined;
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-8">
+    <div className="flex flex-col h-screen bg-background text-foreground">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">ClipWise</h1>
-          <p className="text-sm text-muted-foreground">一键视频剪辑</p>
-        </div>
-        <SettingsDrawer />
-      </div>
-
-      {/* Step 1: Upload */}
-      {step === "upload" && (
-        <UploadZone
-          onUpload={handleUpload}
-          onDurationDetected={setVideoDuration}
-          onPreviewReady={setPreviewUrl}
-        />
-      )}
-
-      {/* Step 2: Config */}
-      {step === "config" && uploadResult && (
-        <div className="space-y-6">
-          {/* Show uploaded file info */}
-          <div className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3">
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{uploadResult.filename}</p>
-            </div>
-            <Button variant="ghost" size="sm" onClick={handleReset}>
+      <header className="flex items-center justify-between px-6 py-3 border-b">
+        <h1 className="text-xl font-bold">ClipWise</h1>
+        <div className="flex items-center gap-2">
+          {pageStatus !== "idle" && (
+            <Button variant="ghost" size="sm" onClick={handleChangeFile}>
               更换文件
             </Button>
-          </div>
+          )}
+          <SettingsDrawer />
+        </div>
+      </header>
 
-          {previewUrl && videoDuration > 0 && (
-            <VideoTrimmer
-              videoUrl={previewUrl}
-              duration={videoDuration}
-              onTrimChange={setTrim}
+      {/* Main content */}
+      <div className="flex flex-1 min-h-0">
+        {/* Left: Video area */}
+        <div className="flex-1 flex items-center justify-center p-6">
+          {pageStatus === "idle" ? (
+            <FilePicker onFileReady={handleFileReady} />
+          ) : videoInfo ? (
+            <VideoPreview
+              ref={videoRef}
+              previewUrl={videoInfo.previewUrl}
+              cleanedVideoUrl={cleanedVideoUrl}
+            />
+          ) : null}
+        </div>
+
+        {/* Right: Panel */}
+        <div className="w-80 border-l flex flex-col min-h-0">
+          {pageStatus === "idle" && (
+            <div className="p-4 text-sm text-muted-foreground">
+              <p className="mb-2">选择视频文件开始处理</p>
+              <p>ClipWise 会自动去除静音和填充词，提取高光片段，生成字幕和发布文案。</p>
+            </div>
+          )}
+          {pageStatus === "uploaded" && videoInfo && (
+            <ConfigPanel
+              videoInfo={{
+                resolution: videoInfo.resolution,
+                duration: videoInfo.duration,
+                size: videoInfo.size,
+              }}
+              onStart={handleStart}
             />
           )}
-
-          <TaskConfigPanel mode={mode} setMode={setMode} config={config} setConfig={setConfig} />
-
-          <Button
-            onClick={handleStart}
-            disabled={loading}
-            size="lg"
-            className="w-full"
-          >
-            {loading ? "提交中..." : "开始处理"}
-          </Button>
-        </div>
-      )}
-
-      {/* Video preview — visible during processing & failed */}
-      {(step === "processing" || step === "failed") && previewUrl && (
-        <div className="space-y-2">
-          <video src={previewUrl} controls className="w-full rounded-lg" />
-          <p className="truncate text-sm text-muted-foreground">{uploadResult?.filename}</p>
-        </div>
-      )}
-
-      {/* Step 3: Processing */}
-      {step === "processing" && taskId && (
-        <ProgressDisplay taskId={taskId} />
-      )}
-
-      {/* Step 4: Failed */}
-      {step === "failed" && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-6 text-center">
-          <p className="text-sm font-medium text-destructive">处理失败</p>
-          {taskError && <p className="mt-2 text-sm text-muted-foreground">{taskError}</p>}
-          <div className="mt-4 flex justify-center gap-3">
-            <Button variant="outline" size="sm" onClick={handleRetry}>重试</Button>
-            <Button variant="ghost" size="sm" onClick={handleReset}>重新上传</Button>
-          </div>
-        </div>
-      )}
-
-      {/* Step 5: Done */}
-      {step === "done" && taskResult && taskId && (
-        <div className="space-y-8">
-          {/* Cleaned video */}
-          {taskResult.cleaned_video && (
-            <section className="space-y-4">
-              <h2 className="text-lg font-semibold">清理后的视频</h2>
-              <VideoPlayer src={`/api/tasks/${taskId}/download?type=cleaned`} />
-              <div className="flex gap-3">
-                <a
-                  href={`/api/tasks/${taskId}/download?type=cleaned`}
-                  download
-                  className={cn(buttonVariants({ size: "sm" }))}
-                >
-                  下载视频
-                </a>
-                {taskResult.subtitle_file && (
-                  <a
-                    href={`/api/tasks/${taskId}/download?type=subtitle`}
-                    download
-                    className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-                  >
-                    下载字幕
-                  </a>
-                )}
-              </div>
-            </section>
+          {(pageStatus === "processing" || pageStatus === "failed") && (
+            <ProcessingPanel task={task} segments={segments} />
           )}
-
-          {/* Clips */}
-          {taskResult.clips && taskResult.clips.length > 0 && (
-            <section className="space-y-4">
-              <h2 className="text-lg font-semibold">精华片段（{taskResult.clips.length}）</h2>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                {taskResult.clips.map((clip, i) => (
-                  <ClipCard
-                    key={i}
-                    title={clip.title}
-                    duration={clip.duration}
-                    score={clip.score}
-                    previewUrl={`/api/tasks/${taskId}/download?type=cleaned`}
-                    downloadUrl={`/api/tasks/${taskId}/download?type=clips`}
-                  />
-                ))}
-              </div>
-            </section>
+          {pageStatus === "failed" && (
+            <div className="p-4 border-t">
+              <p className="text-sm text-red-500 mb-2">{task?.error || "处理失败"}</p>
+              <Button variant="outline" className="w-full" onClick={handleReprocess}>
+                重试
+              </Button>
+            </div>
           )}
-
-          {/* Copy panel */}
-          {taskResult.copy && taskResult.copy.length > 0 && (
-            <CopyPanel copies={taskResult.copy} />
+          {pageStatus === "done" && taskResult && taskId && (
+            <ResultPanel
+              taskId={taskId}
+              result={taskResult}
+              onReprocess={handleReprocess}
+            />
           )}
-
-          {/* Actions */}
-          <div className="flex items-center justify-center gap-4 border-t border-border pt-6">
-            <a
-              href={`/api/tasks/${taskId}/download?type=all`}
-              download
-              className={cn(buttonVariants())}
-            >
-              下载全部 (ZIP)
-            </a>
-            <Button variant="outline" onClick={handleReset}>
-              处理新视频
-            </Button>
-          </div>
         </div>
+      </div>
+
+      {/* Timeline */}
+      {pageStatus !== "idle" && videoInfo && (
+        <Timeline
+          videoRef={videoRef}
+          duration={videoInfo.duration}
+          segments={segments}
+          clips={clips}
+        />
       )}
     </div>
   );
