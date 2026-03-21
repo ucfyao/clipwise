@@ -57,10 +57,11 @@ export function useTaskSSE(taskId: string | null) {
             setState((prev) => ({ ...prev, clips: data.data }));
           } else if (data.type === "log") {
             const entry: LogEntry = {
-              timestamp: new Date().toISOString().slice(11, 23),
+              timestamp: new Date().toLocaleTimeString(),
               level: data.level || "info",
               message: data.message,
             };
+            console.log("[SSE:log]", data.message);
             setState((prev) => ({
               ...prev,
               logs: [...prev.logs, entry].slice(-200),

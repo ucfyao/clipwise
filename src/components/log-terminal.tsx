@@ -38,11 +38,8 @@ export function LogTerminal({ logs }: LogTerminalProps) {
           <div className="text-[#3a3a5a]">等待日志...</div>
         )}
         {logs.map((log, i) => (
-          <div key={i} className="flex gap-2">
-            <span className="text-[#3a3a5a] shrink-0 select-none">{log.message.slice(1, 13)}</span>
-            <span className={`${LEVEL_COLORS[log.level] || LEVEL_COLORS.info}`}>
-              {log.message.slice(14)}
-            </span>
+          <div key={i} className={`break-all ${LEVEL_COLORS[log.level] || LEVEL_COLORS.info}`}>
+            {log.message}
           </div>
         ))}
         <div ref={bottomRef} />
