@@ -2,6 +2,8 @@
 import json
 import sys
 import os
+import time
+import threading
 
 import mlx_whisper
 
@@ -29,9 +31,30 @@ def main():
         sys.exit(1)
 
     model_id = MODEL_MAP.get(model_size, MODEL_MAP["large-v3"])
+    file_size_mb = os.path.getsize(video_path) / (1024 * 1024)
+
+    progress("loading_model", 5, message=f"加载模型 {model_size} (MLX GPU)...")
+    progress("transcribing", 8, message=f"文件大小: {file_size_mb:.1f}MB")
 
     try:
-        progress("loading_model", 5, message=f"加载模型 {model_size} (MLX GPU)...")
+        # Heartbeat thread — sends progress ticks while transcribing
+        # so the UI doesn't look frozen
+        transcribing = True
+        start_time = time.time()
+
+        def heartbeat():
+            tick = 10
+            while transcribing:
+                elapsed = time.time() - start_time
+                # Slowly increment from 10% to 85% over time
+                pct = min(10 + int(elapsed * 2), 85)
+                progress("transcribing", pct, message=f"GPU 转录中... ({elapsed:.0f}s)")
+                time.sleep(3)
+
+        hb_thread = threading.Thread(target=heartbeat, daemon=True)
+        hb_thread.start()
+
+        progress("transcribing", 10, message="开始 GPU 转录...")
 
         result = mlx_whisper.transcribe(
             video_path,
@@ -40,7 +63,9 @@ def main():
             language=None,
         )
 
-        progress("transcribing", 50, message="转录中...")
+        transcribing = False
+        elapsed = time.time() - start_time
+        progress("transcribing", 88, message=f"转录完成 ({elapsed:.1f}s)，处理结果...")
 
         output = {
             "language": result.get("language", "unknown"),
@@ -48,7 +73,10 @@ def main():
             "segments": [],
         }
 
-        for segment in result.get("segments", []):
+        total_segments = len(result.get("segments", []))
+        progress("transcribing", 89, message=f"解析 {total_segments} 个语音段落...")
+
+        for i, segment in enumerate(result.get("segments", [])):
             words = []
             if "words" in segment:
                 words = [
@@ -66,12 +94,15 @@ def main():
             if segment["end"] > output["duration"]:
                 output["duration"] = segment["end"]
 
-        progress("transcribing", 90, message="写入结果...")
+        detected_lang = output["language"]
+        duration = output["duration"]
+        progress("transcribing", 95, message=f"语言: {detected_lang}, 时长: {duration:.0f}s, {total_segments} 段")
 
+        progress("transcribing", 97, message="写入转录文件...")
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(output, f, ensure_ascii=False, indent=2)
 
-        progress("transcribe_done", 100)
+        progress("transcribe_done", 100, message=f"转录完成! {total_segments} 段, 耗时 {elapsed:.1f}s")
 
     except Exception as e:
         progress("error", 0, error=f"Transcription failed: {e}")
