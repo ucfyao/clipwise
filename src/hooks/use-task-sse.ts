@@ -24,54 +24,72 @@ export function useTaskSSE(taskId: string | null) {
     logs: [],
   });
   const sourceRef = useRef<EventSource | null>(null);
+  const retriesRef = useRef(0);
 
   useEffect(() => {
     if (!taskId) return;
 
-    const source = new EventSource(`/api/tasks/${taskId}/sse`);
-    sourceRef.current = source;
+    let disposed = false;
 
-    source.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
+    function connect() {
+      if (disposed) return;
 
-        if (data.type === "segments") {
-          setState((prev) => ({ ...prev, segments: data.data }));
-        } else if (data.type === "clips") {
-          setState((prev) => ({ ...prev, clips: data.data }));
-        } else if (data.type === "log") {
-          const entry: LogEntry = {
-            timestamp: new Date().toISOString().slice(11, 23),
-            level: data.level || "info",
-            message: data.message,
-          };
-          setState((prev) => ({
-            ...prev,
-            logs: [...prev.logs, entry].slice(-200), // keep last 200
-          }));
-        } else {
-          // progress or full task update
-          setState((prev) => ({
-            ...prev,
-            task: { ...prev.task, ...data },
-          }));
+      const source = new EventSource(`/api/tasks/${taskId}/sse`);
+      sourceRef.current = source;
+
+      source.onmessage = (event) => {
+        retriesRef.current = 0; // reset on successful message
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.type === "segments") {
+            setState((prev) => ({ ...prev, segments: data.data }));
+          } else if (data.type === "clips") {
+            setState((prev) => ({ ...prev, clips: data.data }));
+          } else if (data.type === "log") {
+            const entry: LogEntry = {
+              timestamp: new Date().toISOString().slice(11, 23),
+              level: data.level || "info",
+              message: data.message,
+            };
+            setState((prev) => ({
+              ...prev,
+              logs: [...prev.logs, entry].slice(-200),
+            }));
+          } else {
+            setState((prev) => ({
+              ...prev,
+              task: { ...prev.task, ...data },
+            }));
+          }
+        } catch {
+          // ignore parse errors
         }
-      } catch {
-        // ignore parse errors
-      }
-    };
+      };
 
-    source.onerror = () => {
-      source.close();
-    };
+      source.onerror = () => {
+        source.close();
+        sourceRef.current = null;
+        // Auto-reconnect unless task is done/failed or we've retried too many times
+        if (!disposed && retriesRef.current < 30) {
+          retriesRef.current++;
+          const delay = Math.min(1000 * retriesRef.current, 5000);
+          setTimeout(connect, delay);
+        }
+      };
+    }
+
+    connect();
 
     return () => {
-      source.close();
+      disposed = true;
+      sourceRef.current?.close();
       sourceRef.current = null;
     };
   }, [taskId]);
 
   const reset = useCallback(() => {
+    retriesRef.current = 0;
     setState({ task: null, segments: [], clips: [], logs: [] });
   }, []);
 
