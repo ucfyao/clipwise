@@ -60,7 +60,7 @@ export async function cleanVideo(
     "-i", inputPath,
     "-vf", vf,
     "-af", af,
-    "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+    "-c:v", "h264_videotoolbox", "-q:v", "65",
     "-c:a", "aac", "-b:a", "128k",
     outputPath,
   ]);
@@ -81,7 +81,7 @@ export async function extractClip(
     "-i", inputPath,
     "-ss", clip.start.toString(),
     "-to", clip.end.toString(),
-    "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+    "-c:v", "h264_videotoolbox", "-q:v", "65",
     "-c:a", "aac", "-b:a", "128k",
     outputPath,
   ]);
