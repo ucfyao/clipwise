@@ -32,6 +32,11 @@ function Home() {
   const [keepFillers, setKeepFillers] = useState(false);
   const [subtitleStyle, setSubtitleStyle] = useState<"default" | "large-center">("default");
   const [burnSubtitles, setBurnSubtitles] = useState(false);
+  const [normalizeAudio, setNormalizeAudio] = useState(false);
+  const [denoise, setDenoise] = useState<"off" | "light" | "medium" | "strong">("off");
+  const [speed, setSpeed] = useState<1 | 1.25 | 1.5 | 2>(1);
+  const [fadeEnabled, setFadeEnabled] = useState(false);
+  const [fadeDuration, setFadeDuration] = useState(1);
   const [clientLogs, setClientLogs] = useState<LogEntry[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -100,6 +105,10 @@ function Home() {
             keep_fillers: keepFillers,
             subtitle_style: subtitleStyle,
             burn_subtitles: burnSubtitles,
+            normalize_audio: normalizeAudio,
+            denoise,
+            speed,
+            fade: { enabled: fadeEnabled, duration: fadeDuration },
           } satisfies TaskConfig,
         }),
       });
@@ -113,7 +122,7 @@ function Home() {
       addLog("任务创建失败", "error");
       setPageStatus("failed");
     }
-  }, [videoInfo, mode, silenceThreshold, keepFillers, subtitleStyle, burnSubtitles, resetSSE, addLog]);
+  }, [videoInfo, mode, silenceThreshold, keepFillers, subtitleStyle, burnSubtitles, normalizeAudio, denoise, speed, fadeEnabled, fadeDuration, resetSSE, addLog]);
 
   const handleReprocess = useCallback(() => {
     setPageStatus("uploaded");
@@ -283,6 +292,123 @@ function Home() {
                   <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4 shadow" />
                 </div>
               </label>
+            </div>
+          </div>
+
+          {/* 音视频增强 */}
+          <div>
+            <div className="text-[11px] uppercase tracking-wider text-[#a0a0b8] mb-3 font-semibold mt-2">音视频增强</div>
+            <div className="space-y-4">
+              {/* Normalize audio */}
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="text-xs text-[#a0a0b8] group/tip relative cursor-help">
+                  音量标准化 <span className="inline-block w-3 h-3 rounded-full bg-[#3a3a5a] text-[8px] text-center leading-3 ml-0.5">?</span>
+                  <span className="absolute left-0 bottom-full mb-1.5 w-44 p-2 bg-[#0f0f1a] border border-[#3a3a5a] rounded-lg text-[10px] leading-relaxed opacity-0 invisible group-hover/tip:opacity-100 group-hover/tip:visible transition-all z-50 shadow-xl">自动将音量标准化到 -16 LUFS，适合多段视频音量不一致的情况</span>
+                </span>
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={normalizeAudio}
+                    onChange={(e) => setNormalizeAudio(e.target.checked)}
+                    disabled={isProcessing}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-[#252540] rounded-full peer-checked:bg-[#6366f1] transition-colors border border-[#3a3a5a]" />
+                  <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4 shadow" />
+                </div>
+              </label>
+
+              {/* Denoise */}
+              <div>
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span className="text-xs text-[#a0a0b8] group/tip relative cursor-help">
+                    降噪 <span className="inline-block w-3 h-3 rounded-full bg-[#3a3a5a] text-[8px] text-center leading-3 ml-0.5">?</span>
+                    <span className="absolute left-0 bottom-full mb-1.5 w-44 p-2 bg-[#0f0f1a] border border-[#3a3a5a] rounded-lg text-[10px] leading-relaxed opacity-0 invisible group-hover/tip:opacity-100 group-hover/tip:visible transition-all z-50 shadow-xl">去除背景噪音（风扇、空调等）</span>
+                  </span>
+                  <div className="relative">
+                    <input
+                      type="checkbox"
+                      checked={denoise !== "off"}
+                      onChange={(e) => setDenoise(e.target.checked ? "light" : "off")}
+                      disabled={isProcessing}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-[#252540] rounded-full peer-checked:bg-[#6366f1] transition-colors border border-[#3a3a5a]" />
+                    <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4 shadow" />
+                  </div>
+                </label>
+                {denoise !== "off" && (
+                  <select
+                    value={denoise}
+                    onChange={(e) => setDenoise(e.target.value as "light" | "medium" | "strong")}
+                    disabled={isProcessing}
+                    className="w-full bg-[#252540] border border-[#3a3a5a] rounded-lg px-3 py-2 text-xs text-[#f0f0f5] focus:border-[#6366f1] focus:outline-none disabled:opacity-50 mt-2"
+                  >
+                    <option value="light">轻度</option>
+                    <option value="medium">中度</option>
+                    <option value="strong">强力</option>
+                  </select>
+                )}
+              </div>
+
+              {/* Speed */}
+              <div>
+                <span className="text-xs text-[#a0a0b8] block mb-1.5">播放速度</span>
+                <select
+                  value={speed}
+                  onChange={(e) => setSpeed(Number(e.target.value) as 1 | 1.25 | 1.5 | 2)}
+                  disabled={isProcessing}
+                  className="w-full bg-[#252540] border border-[#3a3a5a] rounded-lg px-3 py-2 text-xs text-[#f0f0f5] focus:border-[#6366f1] focus:outline-none disabled:opacity-50"
+                >
+                  <option value={1}>1x (原速)</option>
+                  <option value={1.25}>1.25x</option>
+                  <option value={1.5}>1.5x</option>
+                  <option value={2}>2x</option>
+                </select>
+              </div>
+
+              {/* Fade in/out */}
+              <div>
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span className="text-xs text-[#a0a0b8] group/tip relative cursor-help">
+                    淡入淡出 <span className="inline-block w-3 h-3 rounded-full bg-[#3a3a5a] text-[8px] text-center leading-3 ml-0.5">?</span>
+                    <span className="absolute left-0 bottom-full mb-1.5 w-44 p-2 bg-[#0f0f1a] border border-[#3a3a5a] rounded-lg text-[10px] leading-relaxed opacity-0 invisible group-hover/tip:opacity-100 group-hover/tip:visible transition-all z-50 shadow-xl">在视频首尾添加渐显渐隐效果</span>
+                  </span>
+                  <div className="relative">
+                    <input
+                      type="checkbox"
+                      checked={fadeEnabled}
+                      onChange={(e) => setFadeEnabled(e.target.checked)}
+                      disabled={isProcessing}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-[#252540] rounded-full peer-checked:bg-[#6366f1] transition-colors border border-[#3a3a5a]" />
+                    <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4 shadow" />
+                  </div>
+                </label>
+                {fadeEnabled && (
+                  <div className="mt-2">
+                    <div className="flex justify-between mb-2">
+                      <span className="text-xs text-[#a0a0b8]">时长</span>
+                      <span className="text-xs text-[#6366f1] font-medium">{fadeDuration}s</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="3"
+                      step="0.5"
+                      value={fadeDuration}
+                      onChange={(e) => setFadeDuration(Number(e.target.value))}
+                      disabled={isProcessing}
+                      className="w-full h-1.5 rounded-full appearance-none bg-[#252540] accent-[#6366f1] cursor-pointer disabled:opacity-50"
+                    />
+                    <div className="flex justify-between mt-1">
+                      <span className="text-[10px] text-[#a0a0b8]/60">0.5s</span>
+                      <span className="text-[10px] text-[#a0a0b8]/60">3s</span>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
