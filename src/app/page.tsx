@@ -8,6 +8,7 @@ import { ResultPanel } from "@/components/result-panel";
 import { Timeline } from "@/components/timeline";
 import { SettingsDrawer } from "@/components/settings-drawer";
 import { useTaskSSE } from "@/hooks/use-task-sse";
+import { LogTerminal } from "@/components/log-terminal";
 import { Button } from "@/components/ui/button";
 import { Scissors, Sparkles, Wand2 } from "lucide-react";
 import type { PageStatus, TaskConfig, TaskMode, TaskResult } from "@/lib/schema";
@@ -33,7 +34,7 @@ export default function Home() {
   const [burnSubtitles, setBurnSubtitles] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  const { task, segments, clips, reset: resetSSE } = useTaskSSE(
+  const { task, segments, clips, logs, reset: resetSSE } = useTaskSSE(
     pageStatus === "processing" ? taskId : null
   );
 
@@ -318,7 +319,12 @@ export default function Home() {
             </div>
           )}
           {(pageStatus === "processing" || pageStatus === "failed") && (
-            <ProcessingPanel task={task} segments={segments} />
+            <>
+              <ProcessingPanel task={task} segments={segments} />
+              <div className="flex-1 min-h-0 p-3 pt-0">
+                <LogTerminal logs={logs} />
+              </div>
+            </>
           )}
           {pageStatus === "failed" && (
             <div className="p-4 border-t border-[#3a3a5a]">
