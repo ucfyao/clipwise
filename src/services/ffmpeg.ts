@@ -1,6 +1,6 @@
 import { spawn } from "child_process";
 import path from "path";
-import { OUTPUTS_DIR, TEMP_DIR } from "@/lib/constants";
+import { OUTPUTS_DIR } from "@/lib/constants";
 import { Segment } from "./analyze";
 import { Clip } from "./extract";
 import fs from "fs/promises";
@@ -21,6 +21,10 @@ function runFFmpeg(args: string[]): Promise<void> {
   });
 }
 
+/**
+ * Remove silence/filler segments using select/aselect filter approach (Remsi method).
+ * Single FFmpeg command, no temp files, frame-accurate cuts.
+ */
 export async function cleanVideo(
   inputPath: string,
   segments: Segment[],
@@ -31,57 +35,35 @@ export async function cleanVideo(
   const keepSegments = segments.filter((s) => s.type === "keep");
   if (!keepSegments.length) throw new Error("No segments to keep");
 
-  // Merge adjacent keep segments to reduce cuts (and avoid keyframe drift)
-  const mergedSegments: { start: number; end: number }[] = [];
-  for (const seg of keepSegments) {
-    const last = mergedSegments[mergedSegments.length - 1];
-    if (last && Math.abs(seg.start - last.end) < 0.05) {
-      // Adjacent — extend the previous segment
-      last.end = seg.end;
-    } else {
-      mergedSegments.push({ start: seg.start, end: seg.end });
-    }
-  }
+  // Build between() expressions for all keep segments
+  const betweenExprs = keepSegments
+    .map((s) => `between(t,${s.start.toFixed(3)},${s.end.toFixed(3)})`)
+    .join("+");
 
-  console.log(`[ffmpeg] ${keepSegments.length} keep segments merged to ${mergedSegments.length} cuts`);
-
-  const concatPath = path.join(TEMP_DIR, `${taskId}-concat.txt`);
-  const partPaths: string[] = [];
-
-  for (let i = 0; i < mergedSegments.length; i++) {
-    const seg = mergedSegments[i];
-    const partPath = path.join(TEMP_DIR, `${taskId}-part${i}.mp4`);
-    partPaths.push(partPath);
-
-    // Use re-encode for precise cuts (avoid keyframe drift that adds extra frames)
-    await runFFmpeg([
-      "-i", inputPath,
-      "-ss", seg.start.toString(),
-      "-to", seg.end.toString(),
-      "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-      "-c:a", "aac", "-b:a", "128k",
-      "-avoid_negative_ts", "make_zero",
-      partPath,
-    ]);
-  }
-
-  const concatContent = partPaths.map((p) => `file '${p}'`).join("\n");
-  await fs.writeFile(concatPath, concatContent, "utf-8");
+  console.log(`[ffmpeg] Using select/aselect filter with ${keepSegments.length} keep segments`);
 
   const outputPath = path.join(OUTPUTS_DIR, `${taskId}-cleaned.mp4`);
-  const concatArgs = ["-f", "concat", "-safe", "0", "-i", concatPath];
 
+  // Video filter: select keep segments + reset timestamps
+  let vf = `select='${betweenExprs}',setpts=N/FRAME_RATE/TB`;
+
+  // Optionally burn subtitles
   if (burnSubtitles && srtPath) {
     const escapedSrt = srtPath.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "'\\''");
-    concatArgs.push("-vf", `subtitles='${escapedSrt}'`, "-c:a", "copy", outputPath);
-  } else {
-    concatArgs.push("-c", "copy", outputPath);
+    vf += `,subtitles='${escapedSrt}'`;
   }
 
-  await runFFmpeg(concatArgs);
+  // Audio filter: same selection + reset timestamps
+  const af = `aselect='${betweenExprs}',asetpts=N/SR/TB`;
 
-  for (const p of partPaths) await fs.unlink(p).catch(() => {});
-  await fs.unlink(concatPath).catch(() => {});
+  await runFFmpeg([
+    "-i", inputPath,
+    "-vf", vf,
+    "-af", af,
+    "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+    "-c:a", "aac", "-b:a", "128k",
+    outputPath,
+  ]);
 
   return outputPath;
 }
@@ -94,12 +76,13 @@ export async function extractClip(
 ): Promise<string> {
   const outputPath = path.join(OUTPUTS_DIR, `${taskId}-clip${clipIndex}.mp4`);
 
+  // Re-encode for precise cut
   await runFFmpeg([
     "-i", inputPath,
     "-ss", clip.start.toString(),
     "-to", clip.end.toString(),
-    "-c", "copy",
-    "-avoid_negative_ts", "make_zero",
+    "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+    "-c:a", "aac", "-b:a", "128k",
     outputPath,
   ]);
 
