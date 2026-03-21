@@ -116,11 +116,15 @@ export async function retryTask(id: string) {
 // --- Processing pipeline ---
 // Progress mapping: 0-30% transcription, 30-50% analysis, 50-75% FFmpeg clean, 75-95% clips, 95-100% done
 async function processTask(taskId: string) {
+  console.log(`[task:${taskId}] ========== START PROCESSING ==========`);
   const task = getTaskById(taskId);
   if (!task) throw new Error("Task not found");
 
   const config: TaskConfig = JSON.parse(task.config);
   const result: TaskResult = {};
+  console.log(`[task:${taskId}] File: ${task.filename}`);
+  console.log(`[task:${taskId}] Mode: ${task.mode}`);
+  console.log(`[task:${taskId}] Config: ${JSON.stringify(config)}`);
 
   try {
     // === Pre-step: Trim video if configured ===
@@ -149,6 +153,8 @@ async function processTask(taskId: string) {
     }
 
     // === Step 1: Transcribe ===
+    console.log(`[task:${taskId}] Step 1: Starting transcription...`);
+    console.log(`[task:${taskId}] Video path: ${videoPath}`);
     updateTask(taskId, { status: "transcribing", progress: 5, current_step: "准备转录..." });
 
     const transcriptPath = await transcribeVideo(videoPath, taskId, (data) => {
@@ -162,7 +168,9 @@ async function processTask(taskId: string) {
     });
 
     // After transcription, push initial speech/silence segments
+    console.log(`[task:${taskId}] Transcription complete! Reading transcript...`);
     const rawTranscript = JSON.parse(await fs.readFile(transcriptPath, "utf-8"));
+    console.log(`[task:${taskId}] Transcript: ${rawTranscript.segments?.length} segments, duration=${rawTranscript.duration}s, language=${rawTranscript.language}`);
     const tSegments = rawTranscript.segments as Array<{ start: number; end: number; text: string }>;
     const initialSegments: TimelineSegment[] = [];
     for (let i = 0; i < tSegments.length; i++) {
@@ -183,14 +191,17 @@ async function processTask(taskId: string) {
         initialSegments.push({ start: lastEnd, end: rawTranscript.duration, type: "silence" });
       }
     }
+    console.log(`[task:${taskId}] Pushed ${initialSegments.length} initial segments to timeline`);
     notifySegments(taskId, initialSegments);
 
     // === Step 2: Feature A — Clean ===
     if (task.mode === "clean" || task.mode === "both") {
       const hasApiKey = hasAIKey();
+      console.log(`[task:${taskId}] Step 2: Analysis (hasApiKey=${hasApiKey})`);
 
       let analysis: AnalysisResult;
       if (hasApiKey) {
+        console.log(`[task:${taskId}] Using AI analysis...`);
         updateTask(taskId, { status: "analyzing", progress: 35, current_step: "Analyzing content with AI..." });
         analysis = await analyzeTranscript(
           transcriptPath,
@@ -198,12 +209,19 @@ async function processTask(taskId: string) {
           config.keep_fillers
         );
       } else {
+        console.log(`[task:${taskId}] Using basic silence detection (no API key)`);
         updateTask(taskId, { status: "analyzing", progress: 35, current_step: "Detecting silence (basic mode)..." });
         analysis = await analyzeTranscriptBasic(
           transcriptPath,
           config.silence_threshold
         );
       }
+
+      console.log(`[task:${taskId}] Analysis complete: ${analysis.segments.length} segments`);
+      const silenceCount = analysis.segments.filter(s => s.type === "silence").length;
+      const fillerCount = analysis.segments.filter(s => s.type === "filler").length;
+      const keepCount = analysis.segments.filter(s => s.type === "keep").length;
+      console.log(`[task:${taskId}] Breakdown: keep=${keepCount}, silence=${silenceCount}, filler=${fillerCount}`);
 
       // Push classified segments after analysis
       const classifiedSegments: TimelineSegment[] = analysis.segments.map((s) => ({
@@ -213,7 +231,9 @@ async function processTask(taskId: string) {
         reason: s.reason || (s.type === "silence" ? `静音 ${(s.end - s.start).toFixed(1)}s` : undefined),
       }));
       notifySegments(taskId, classifiedSegments);
+      console.log(`[task:${taskId}] Pushed classified segments to timeline`);
 
+      console.log(`[task:${taskId}] Generating subtitles...`);
       updateTask(taskId, { progress: 50, current_step: "Generating subtitles..." });
       const srtPath = await generateSRT(analysis.segments, path.join(OUTPUTS_DIR, `${taskId}.srt`));
       result.srt_file = srtPath;
@@ -222,6 +242,8 @@ async function processTask(taskId: string) {
       const assPath = await generateAnimatedASS(transcriptPath, path.join(OUTPUTS_DIR, `${taskId}.ass`), config.subtitle_style);
       result.subtitle_file = assPath; // Prefer ASS over SRT
 
+      console.log(`[task:${taskId}] Subtitles generated: SRT=${srtPath}, ASS=${assPath}`);
+      console.log(`[task:${taskId}] Cleaning video with FFmpeg...`);
       updateTask(taskId, { status: "processing", progress: 55, current_step: "Cleaning video..." });
       const cleanedPath = await cleanVideo(
         videoPath,
@@ -231,14 +253,18 @@ async function processTask(taskId: string) {
         srtPath
       );
       result.cleaned_video = cleanedPath;
+      console.log(`[task:${taskId}] Video cleaned: ${cleanedPath}`);
     }
 
     // === Step 3: Feature B — Highlights (requires API key) ===
     const hasApiKeyForHighlights = hasAIKey();
+    console.log(`[task:${taskId}] Step 3: Highlights (mode=${task.mode}, hasApiKey=${hasApiKeyForHighlights})`);
     if ((task.mode === "highlights" || task.mode === "both") && hasApiKeyForHighlights) {
+      console.log(`[task:${taskId}] Extracting highlights...`);
       updateTask(taskId, { progress: 70, current_step: "Extracting highlights..." });
 
       const highlights = await extractHighlights(transcriptPath);
+      console.log(`[task:${taskId}] Found ${highlights.clips.length} highlight clips`);
 
       const timelineClips: TimelineClip[] = highlights.clips.map((c) => ({
         start: c.start,
@@ -293,6 +319,8 @@ async function processTask(taskId: string) {
     }
 
     // === Done ===
+    console.log(`[task:${taskId}] ========== PROCESSING COMPLETE ==========`);
+    console.log(`[task:${taskId}] Result: ${JSON.stringify(Object.keys(result))}`);
     updateTask(taskId, {
       status: "completed",
       progress: 100,
@@ -301,6 +329,8 @@ async function processTask(taskId: string) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    console.error(`[task:${taskId}] ========== FAILED ==========`);
+    console.error(`[task:${taskId}] Error: ${message}`);
     updateTask(taskId, { status: "failed", error: message, current_step: "Failed" });
     throw err;
   }
