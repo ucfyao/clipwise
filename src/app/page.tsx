@@ -334,53 +334,56 @@ function Home() {
         </main>
 
         {/* RIGHT: Status/Results panel */}
-        <aside className="w-[280px] bg-[#1a1a2e] border-l border-[#3a3a5a] flex flex-col min-h-0 overflow-y-auto">
-          {pageStatus === "idle" && (
-            <div className="p-5 text-xs text-[#a0a0b8] space-y-3">
-              <div className="p-4 rounded-xl bg-gradient-to-br from-[#252540] to-[#1e1b4b] border border-[#3a3a5a]">
-                <p className="font-semibold text-sm text-[#f0f0f5] mb-2">AI 视频处理工作台</p>
-                <p className="leading-relaxed">选择视频文件开始。ClipWise 会自动分析并处理你的视频。</p>
+        <aside className="w-[280px] bg-[#1a1a2e] border-l border-[#3a3a5a] flex flex-col min-h-0">
+          {/* Top section — scrollable status content */}
+          <div className="shrink-0 overflow-y-auto" style={{ maxHeight: pageStatus === "processing" ? "45%" : "100%" }}>
+            {pageStatus === "idle" && (
+              <div className="p-5 text-xs text-[#a0a0b8] space-y-3">
+                <div className="p-4 rounded-xl bg-gradient-to-br from-[#252540] to-[#1e1b4b] border border-[#3a3a5a]">
+                  <p className="font-semibold text-sm text-[#f0f0f5] mb-2">AI 视频处理工作台</p>
+                  <p className="leading-relaxed">选择视频文件开始。ClipWise 会自动分析并处理你的视频。</p>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-blue-500" />蓝色 = 有语音内容</div>
+                  <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-red-500" />红色 = 将被删除</div>
+                  <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-green-400" />绿色 = 高光片段</div>
+                </div>
               </div>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-blue-500" />蓝色 = 有语音内容</div>
-                <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-red-500" />红色 = 将被删除</div>
-                <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-green-400" />绿色 = 高光片段</div>
+            )}
+            {pageStatus === "uploaded" && (
+              <div className="p-5 text-xs text-[#a0a0b8]">
+                <div className="p-4 rounded-xl bg-[#252540] border border-[#3a3a5a]">
+                  <p className="font-semibold text-sm text-[#f0f0f5] mb-1">准备就绪</p>
+                  <p>调整左侧参数后点击「开始处理」</p>
+                </div>
               </div>
-            </div>
-          )}
-          {pageStatus === "uploaded" && (
-            <div className="p-5 text-xs text-[#a0a0b8]">
-              <div className="p-4 rounded-xl bg-[#252540] border border-[#3a3a5a]">
-                <p className="font-semibold text-sm text-[#f0f0f5] mb-1">准备就绪</p>
-                <p>调整左侧参数后点击「开始处理」</p>
+            )}
+            {(pageStatus === "processing" || pageStatus === "failed") && (
+              <ProcessingPanel task={task} segments={segments} />
+            )}
+            {pageStatus === "failed" && (
+              <div className="p-4 border-t border-[#3a3a5a]">
+                <p className="text-xs text-red-400 mb-2">{task?.error || "处理失败"}</p>
+                <Button
+                  size="sm"
+                  className="w-full bg-[#252540] border border-[#3a3a5a] hover:bg-[#6366f1] text-xs"
+                  onClick={handleReprocess}
+                >
+                  重试
+                </Button>
               </div>
-            </div>
-          )}
-          {(pageStatus === "processing" || pageStatus === "failed") && (
-            <ProcessingPanel task={task} segments={segments} />
-          )}
-          {pageStatus === "failed" && (
-            <div className="p-4 border-t border-[#3a3a5a]">
-              <p className="text-xs text-red-400 mb-2">{task?.error || "处理失败"}</p>
-              <Button
-                size="sm"
-                className="w-full bg-[#252540] border border-[#3a3a5a] hover:bg-[#6366f1] text-xs"
-                onClick={handleReprocess}
-              >
-                重试
-              </Button>
-            </div>
-          )}
-          {pageStatus === "done" && taskResult && taskId && (
-            <ResultPanel
-              taskId={taskId}
-              result={taskResult}
-              onReprocess={handleReprocess}
-            />
-          )}
-          {/* Log terminal — always visible except idle */}
+            )}
+            {pageStatus === "done" && taskResult && taskId && (
+              <ResultPanel
+                taskId={taskId}
+                result={taskResult}
+                onReprocess={handleReprocess}
+              />
+            )}
+          </div>
+          {/* Bottom section — log terminal, always visible except idle */}
           {pageStatus !== "idle" && (
-            <div className="flex-1 min-h-0 p-3 pt-0">
+            <div className="flex-1 min-h-[200px] p-3 pt-0">
               <LogTerminal logs={localLogs} />
             </div>
           )}
