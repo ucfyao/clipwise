@@ -6,8 +6,6 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "2gb",
     },
   },
-  // Allow large file uploads via route handlers
-  serverExternalPackages: ["better-sqlite3"],
 };
 
 export default nextConfig;

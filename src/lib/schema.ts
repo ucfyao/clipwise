@@ -52,3 +52,26 @@ export const DEFAULT_CONFIG: TaskConfig = {
   subtitle_style: "default",
   burn_subtitles: false,
 };
+
+// --- Timeline & SSE types ---
+
+export interface TimelineSegment {
+  start: number;
+  end: number;
+  type: "speech" | "silence" | "filler" | "keep";
+  reason?: string;
+}
+
+export interface TimelineClip {
+  start: number;
+  end: number;
+  title: string;
+  score: number;
+}
+
+// SSE typed events (segments/clips only — regular task updates have no type field)
+export type SSETypedEvent =
+  | { type: "segments"; data: TimelineSegment[] }
+  | { type: "clips"; data: TimelineClip[] };
+
+export type PageStatus = "idle" | "uploaded" | "processing" | "done" | "failed";

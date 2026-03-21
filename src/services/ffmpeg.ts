@@ -1,12 +1,13 @@
 import { spawn } from "child_process";
 import path from "path";
-import { OUTPUTS_DIR, TEMP_DIR } from "@/lib/constants";
+import { OUTPUTS_DIR } from "@/lib/constants";
 import { Segment } from "./analyze";
 import { Clip } from "./extract";
 import fs from "fs/promises";
 
 function runFFmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
+    console.log(`[ffmpeg] Running: ffmpeg ${args.join(" ").slice(0, 200)}...`);
     const proc = spawn("ffmpeg", ["-y", ...args], {
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -21,6 +22,10 @@ function runFFmpeg(args: string[]): Promise<void> {
   });
 }
 
+/**
+ * Remove silence/filler segments using trim/atrim + concat filter_complex.
+ * Single FFmpeg command, no temp files, frame-accurate cuts.
+ */
 export async function cleanVideo(
   inputPath: string,
   segments: Segment[],
@@ -31,41 +36,52 @@ export async function cleanVideo(
   const keepSegments = segments.filter((s) => s.type === "keep");
   if (!keepSegments.length) throw new Error("No segments to keep");
 
-  const concatPath = path.join(TEMP_DIR, `${taskId}-concat.txt`);
-  const partPaths: string[] = [];
-
-  for (let i = 0; i < keepSegments.length; i++) {
-    const seg = keepSegments[i];
-    const partPath = path.join(TEMP_DIR, `${taskId}-part${i}.mp4`);
-    partPaths.push(partPath);
-
-    await runFFmpeg([
-      "-i", inputPath,
-      "-ss", seg.start.toString(),
-      "-to", seg.end.toString(),
-      "-c", "copy",
-      "-avoid_negative_ts", "make_zero",
-      partPath,
-    ]);
-  }
-
-  const concatContent = partPaths.map((p) => `file '${p}'`).join("\n");
-  await fs.writeFile(concatPath, concatContent, "utf-8");
+  console.log(`[ffmpeg] Building filter_complex with ${keepSegments.length} keep segments`);
 
   const outputPath = path.join(OUTPUTS_DIR, `${taskId}-cleaned.mp4`);
-  const concatArgs = ["-f", "concat", "-safe", "0", "-i", concatPath];
 
-  if (burnSubtitles && srtPath) {
-    const escapedSrt = srtPath.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "'\\''");
-    concatArgs.push("-vf", `subtitles='${escapedSrt}'`, "-c:a", "copy", outputPath);
-  } else {
-    concatArgs.push("-c", "copy", outputPath);
+  // Build trim/atrim + concat filter_complex
+  const filterParts: string[] = [];
+  const concatInputs: string[] = [];
+
+  for (let i = 0; i < keepSegments.length; i++) {
+    const s = keepSegments[i];
+    filterParts.push(
+      `[0:v]trim=start=${s.start.toFixed(3)}:end=${s.end.toFixed(3)},setpts=PTS-STARTPTS[v${i}]`
+    );
+    filterParts.push(
+      `[0:a]atrim=start=${s.start.toFixed(3)}:end=${s.end.toFixed(3)},asetpts=PTS-STARTPTS[a${i}]`
+    );
+    concatInputs.push(`[v${i}][a${i}]`);
   }
 
-  await runFFmpeg(concatArgs);
+  filterParts.push(
+    `${concatInputs.join("")}concat=n=${keepSegments.length}:v=1:a=1[outv][outa]`
+  );
 
-  for (const p of partPaths) await fs.unlink(p).catch(() => {});
-  await fs.unlink(concatPath).catch(() => {});
+  let filterComplex = filterParts.join(";");
+
+  // Optionally burn subtitles on the concatenated output
+  if (burnSubtitles && srtPath) {
+    const escapedSrt = srtPath.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "'\\''");
+    filterComplex += `;[outv]subtitles='${escapedSrt}'[finalv]`;
+  }
+
+  const mapVideo = burnSubtitles && srtPath ? "[finalv]" : "[outv]";
+
+  await runFFmpeg([
+    "-i", inputPath,
+    "-filter_complex", filterComplex,
+    "-map", mapVideo,
+    "-map", "[outa]",
+    "-c:v", "h264_videotoolbox", "-q:v", "65",
+    "-c:a", "aac", "-b:a", "128k",
+    outputPath,
+  ]);
+
+  // Verify output
+  const stat = await fs.stat(outputPath);
+  console.log(`[ffmpeg] Output: ${outputPath} (${(stat.size / 1024 / 1024).toFixed(1)}MB)`);
 
   return outputPath;
 }
@@ -78,12 +94,13 @@ export async function extractClip(
 ): Promise<string> {
   const outputPath = path.join(OUTPUTS_DIR, `${taskId}-clip${clipIndex}.mp4`);
 
+  // Re-encode for precise cut
   await runFFmpeg([
     "-i", inputPath,
     "-ss", clip.start.toString(),
     "-to", clip.end.toString(),
-    "-c", "copy",
-    "-avoid_negative_ts", "make_zero",
+    "-c:v", "h264_videotoolbox", "-q:v", "65",
+    "-c:a", "aac", "-b:a", "128k",
     outputPath,
   ]);
 
