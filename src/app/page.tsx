@@ -27,7 +27,7 @@ export default function Home() {
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [taskResult, setTaskResult] = useState<TaskResult | null>(null);
-  const [mode, setMode] = useState<TaskMode>("both");
+  const [mode, setMode] = useState<TaskMode>("clean");
   const [silenceThreshold, setSilenceThreshold] = useState(3);
   const [keepFillers, setKeepFillers] = useState(false);
   const [subtitleStyle, setSubtitleStyle] = useState<"default" | "large-center">("default");
