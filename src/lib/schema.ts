@@ -22,6 +22,10 @@ export interface TaskConfig {
   subtitle_style: "default" | "large-center";
   burn_subtitles: boolean;
   trim?: { start: number; end: number };
+  normalize_audio: boolean;
+  denoise: "off" | "light" | "medium" | "strong";
+  speed: 1 | 1.25 | 1.5 | 2;
+  fade: { enabled: boolean; duration: number };
 }
 
 export interface TaskResult {
@@ -51,6 +55,10 @@ export const DEFAULT_CONFIG: TaskConfig = {
   keep_fillers: false,
   subtitle_style: "default",
   burn_subtitles: false,
+  normalize_audio: false,
+  denoise: "off",
+  speed: 1,
+  fade: { enabled: false, duration: 1 },
 };
 
 // --- Timeline & SSE types ---
@@ -75,3 +83,28 @@ export type SSETypedEvent =
   | { type: "clips"; data: TimelineClip[] };
 
 export type PageStatus = "idle" | "uploaded" | "processing" | "done" | "failed";
+
+// --- Export tool types ---
+
+export interface ExportRequest {
+  tool: "thumbnail" | "gif" | "audio" | "compress";
+  options: ThumbnailOptions | GIFOptions | AudioOptions | CompressOptions;
+}
+
+export interface ThumbnailOptions {
+  time?: number;
+}
+
+export interface GIFOptions {
+  start: number;
+  duration: number;
+  width?: number;
+}
+
+export interface AudioOptions {
+  format: "mp3" | "aac";
+}
+
+export interface CompressOptions {
+  quality: "high" | "medium" | "low";
+}
