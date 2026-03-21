@@ -219,11 +219,12 @@ async function processTask(taskId: string) {
           config.keep_fillers
         );
       } else {
-        taskLog(taskId, `Using basic silence detection (no API key)`);
-        updateTask(taskId, { status: "analyzing", progress: 35, current_step: "Detecting silence (basic mode)..." });
+        taskLog(taskId, `Using FFmpeg silencedetect (no API key)`);
+        updateTask(taskId, { status: "analyzing", progress: 35, current_step: "检测静音段落..." });
         analysis = await analyzeTranscriptBasic(
           transcriptPath,
-          config.silence_threshold
+          config.silence_threshold,
+          videoPath
         );
       }
 

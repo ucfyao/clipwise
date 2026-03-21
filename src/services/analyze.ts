@@ -1,4 +1,5 @@
 import { aiChat, extractJSON } from "@/lib/ai";
+import { spawn } from "child_process";
 import fs from "fs/promises";
 
 export interface Segment {
@@ -80,23 +81,119 @@ Requirements:
 }
 
 /**
- * Basic analysis without Claude API — uses whisper transcript gaps to detect silence.
- * No filler detection, just silence removal + subtitle generation.
+ * Detect silence using FFmpeg's silencedetect filter (audio waveform analysis).
+ * Much more accurate than Whisper timestamp gaps.
+ */
+function detectSilenceFFmpeg(videoPath: string, silenceThreshold: number): Promise<Array<{ start: number; end: number }>> {
+  return new Promise((resolve, reject) => {
+    // Convert threshold in seconds to dB noise floor
+    // silenceThreshold controls minimum duration, noise floor is fixed at -30dB
+    const noisedB = "-30dB";
+    const minDuration = Math.max(silenceThreshold, 0.3);
+
+    console.log(`[silencedetect] Running: noise=${noisedB}, min_duration=${minDuration}s`);
+
+    const proc = spawn("ffmpeg", [
+      "-i", videoPath,
+      "-af", `silencedetect=n=${noisedB}:d=${minDuration}`,
+      "-f", "null", "-",
+    ], { stdio: ["pipe", "pipe", "pipe"] });
+
+    let stderr = "";
+    proc.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    proc.on("close", (code) => {
+      if (code !== 0 && code !== null) {
+        reject(new Error(`silencedetect failed (code ${code})`));
+        return;
+      }
+
+      const silences: Array<{ start: number; end: number }> = [];
+      const lines = stderr.split("\n");
+
+      let currentStart: number | null = null;
+      for (const line of lines) {
+        const startMatch = line.match(/silence_start:\s*([\d.]+)/);
+        if (startMatch) {
+          currentStart = parseFloat(startMatch[1]);
+        }
+        const endMatch = line.match(/silence_end:\s*([\d.]+)/);
+        if (endMatch && currentStart !== null) {
+          silences.push({ start: currentStart, end: parseFloat(endMatch[1]) });
+          currentStart = null;
+        }
+      }
+
+      console.log(`[silencedetect] Found ${silences.length} silence segments`);
+      resolve(silences);
+    });
+  });
+}
+
+/**
+ * Basic analysis without API — uses FFmpeg silencedetect on the original video.
+ * Combines silence detection with Whisper transcript for text-aware segments.
  */
 export async function analyzeTranscriptBasic(
   transcriptPath: string,
-  silenceThreshold: number
+  silenceThreshold: number,
+  videoPath?: string
 ): Promise<AnalysisResult> {
   const raw = await fs.readFile(transcriptPath, "utf-8");
   const transcript = JSON.parse(raw);
-  const segments: Segment[] = [];
+  const duration = transcript.duration as number;
   const tSegments = transcript.segments as Array<{ start: number; end: number; text: string }>;
 
   if (!tSegments.length) {
-    return { segments: [{ start: 0, end: transcript.duration, type: "silence" }] };
+    return { segments: [{ start: 0, end: duration, type: "silence" }] };
   }
 
-  // Mark gap before first segment as silence
+  // If we have the video path, use FFmpeg silencedetect for accurate detection
+  if (videoPath) {
+    const silences = await detectSilenceFFmpeg(videoPath, silenceThreshold);
+    const segments: Segment[] = [];
+
+    // Build timeline: everything is "keep" unless overlapping with detected silence
+    let cursor = 0;
+    for (const silence of silences) {
+      if (silence.start > cursor) {
+        // Find text for this keep segment from transcript
+        const text = tSegments
+          .filter((t) => t.start < silence.start && t.end > cursor)
+          .map((t) => t.text)
+          .join(" ");
+        segments.push({ start: cursor, end: silence.start, type: "keep", text });
+      }
+      segments.push({
+        start: silence.start,
+        end: silence.end,
+        type: "silence",
+        reason: `静音 ${(silence.end - silence.start).toFixed(1)}s`,
+      });
+      cursor = silence.end;
+    }
+
+    // Remaining after last silence
+    if (cursor < duration) {
+      const text = tSegments
+        .filter((t) => t.end > cursor)
+        .map((t) => t.text)
+        .join(" ");
+      segments.push({ start: cursor, end: duration, type: "keep", text });
+    }
+
+    // If no silence detected at all, keep everything
+    if (segments.length === 0) {
+      segments.push({ start: 0, end: duration, type: "keep" });
+    }
+
+    return { segments };
+  }
+
+  // Fallback: use Whisper transcript gaps (less accurate)
+  const segments: Segment[] = [];
   if (tSegments[0].start > silenceThreshold) {
     segments.push({ start: 0, end: tSegments[0].start, type: "silence" });
   } else if (tSegments[0].start > 0) {
@@ -106,8 +203,6 @@ export async function analyzeTranscriptBasic(
   for (let i = 0; i < tSegments.length; i++) {
     const seg = tSegments[i];
     segments.push({ start: seg.start, end: seg.end, type: "keep", text: seg.text });
-
-    // Check gap between this segment and the next
     if (i < tSegments.length - 1) {
       const gap = tSegments[i + 1].start - seg.end;
       if (gap > silenceThreshold) {
@@ -118,12 +213,11 @@ export async function analyzeTranscriptBasic(
     }
   }
 
-  // Mark gap after last segment as silence
   const lastEnd = tSegments[tSegments.length - 1].end;
-  if (transcript.duration - lastEnd > silenceThreshold) {
-    segments.push({ start: lastEnd, end: transcript.duration, type: "silence" });
-  } else if (transcript.duration - lastEnd > 0.1) {
-    segments.push({ start: lastEnd, end: transcript.duration, type: "keep", text: "" });
+  if (duration - lastEnd > silenceThreshold) {
+    segments.push({ start: lastEnd, end: duration, type: "silence" });
+  } else if (duration - lastEnd > 0.1) {
+    segments.push({ start: lastEnd, end: duration, type: "keep", text: "" });
   }
 
   return { segments };
