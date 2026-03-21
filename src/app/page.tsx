@@ -151,23 +151,29 @@ export default function Home() {
             <div className="text-[11px] uppercase tracking-wider text-[#a0a0b8] mb-3 font-semibold">处理模式</div>
             <div className="grid grid-cols-2 gap-2">
               {([
-                { key: "clean" as TaskMode, icon: Scissors, label: "清理" },
-                { key: "highlights" as TaskMode, icon: Sparkles, label: "高光" },
-                { key: "both" as TaskMode, icon: Wand2, label: "全部" },
-              ]).map(({ key, icon: Icon, label }) => (
-                <button
-                  key={key}
-                  disabled={isProcessing}
-                  onClick={() => setMode(key)}
-                  className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-all text-xs font-medium ${
-                    mode === key
-                      ? "bg-[#6366f1] border-[#6366f1] text-white shadow-lg shadow-purple-500/20"
-                      : "bg-[#252540] border-[#3a3a5a] text-[#a0a0b8] hover:bg-[#6366f1]/20 hover:border-[#6366f1]/50"
-                  } ${key === "both" ? "col-span-2" : ""} ${isProcessing ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-                >
-                  <Icon className="w-5 h-5" />
-                  {label}
-                </button>
+                { key: "clean" as TaskMode, icon: Scissors, label: "清理", tip: "去除静音段落，生成字幕。无 API Key 时使用基础静音检测（无填充词识别）" },
+                { key: "highlights" as TaskMode, icon: Sparkles, label: "高光", tip: "AI 提取精彩片段，自动裁剪为竖屏短视频，生成多平台文案。需要 API Key" },
+                { key: "both" as TaskMode, icon: Wand2, label: "清理+高光", tip: "先清理再提取高光，完整处理流程。高光功能需要 API Key" },
+              ]).map(({ key, icon: Icon, label, tip }) => (
+                <div key={key} className={`relative group ${key === "both" ? "col-span-2" : ""}`}>
+                  <button
+                    disabled={isProcessing}
+                    onClick={() => setMode(key)}
+                    className={`w-full flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-all text-xs font-medium ${
+                      mode === key
+                        ? "bg-[#6366f1] border-[#6366f1] text-white shadow-lg shadow-purple-500/20"
+                        : "bg-[#252540] border-[#3a3a5a] text-[#a0a0b8] hover:bg-[#6366f1]/20 hover:border-[#6366f1]/50"
+                    } ${isProcessing ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                  >
+                    <Icon className="w-5 h-5" />
+                    {label}
+                  </button>
+                  {/* Tooltip */}
+                  <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-52 p-2.5 bg-[#0f0f1a] border border-[#3a3a5a] rounded-lg text-[10px] text-[#a0a0b8] leading-relaxed opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 shadow-xl pointer-events-none">
+                    <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-[#3a3a5a]" />
+                    {tip}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
@@ -179,7 +185,10 @@ export default function Home() {
               {/* Silence threshold */}
               <div>
                 <div className="flex justify-between mb-2">
-                  <span className="text-xs text-[#a0a0b8]">静音阈值</span>
+                  <span className="text-xs text-[#a0a0b8] group/tip relative cursor-help">
+                    静音阈值 <span className="inline-block w-3 h-3 rounded-full bg-[#3a3a5a] text-[8px] text-center leading-3 ml-0.5">?</span>
+                    <span className="absolute left-0 bottom-full mb-1.5 w-44 p-2 bg-[#0f0f1a] border border-[#3a3a5a] rounded-lg text-[10px] leading-relaxed opacity-0 invisible group-hover/tip:opacity-100 group-hover/tip:visible transition-all z-50 shadow-xl">超过该时长的静音段落会被删除。值越小删除越激进。</span>
+                  </span>
                   <span className="text-xs text-[#6366f1] font-medium">{silenceThreshold}s</span>
                 </div>
                 <input
@@ -200,7 +209,10 @@ export default function Home() {
 
               {/* Keep fillers */}
               <label className="flex items-center justify-between cursor-pointer">
-                <span className="text-xs text-[#a0a0b8]">保留填充词</span>
+                <span className="text-xs text-[#a0a0b8] group/tip relative cursor-help">
+                  保留填充词 <span className="inline-block w-3 h-3 rounded-full bg-[#3a3a5a] text-[8px] text-center leading-3 ml-0.5">?</span>
+                  <span className="absolute left-0 bottom-full mb-1.5 w-44 p-2 bg-[#0f0f1a] border border-[#3a3a5a] rounded-lg text-[10px] leading-relaxed opacity-0 invisible group-hover/tip:opacity-100 group-hover/tip:visible transition-all z-50 shadow-xl">开启后保留"嗯""那个"等口语化表达，关闭则自动删除。需要 API Key。</span>
+                </span>
                 <div className="relative">
                   <input
                     type="checkbox"
@@ -216,7 +228,10 @@ export default function Home() {
 
               {/* Subtitle style */}
               <div>
-                <span className="text-xs text-[#a0a0b8] block mb-1.5">字幕样式</span>
+                <span className="text-xs text-[#a0a0b8] block mb-1.5 group/tip relative cursor-help w-fit">
+                  字幕样式 <span className="inline-block w-3 h-3 rounded-full bg-[#3a3a5a] text-[8px] text-center leading-3 ml-0.5">?</span>
+                  <span className="absolute left-0 bottom-full mb-1.5 w-44 p-2 bg-[#0f0f1a] border border-[#3a3a5a] rounded-lg text-[10px] leading-relaxed opacity-0 invisible group-hover/tip:opacity-100 group-hover/tip:visible transition-all z-50 shadow-xl">生成的 ASS 字幕样式。大号居中适合竖屏短视频。</span>
+                </span>
                 <select
                   value={subtitleStyle}
                   onChange={(e) => setSubtitleStyle(e.target.value as "default" | "large-center")}
@@ -230,7 +245,10 @@ export default function Home() {
 
               {/* Burn subtitles */}
               <label className="flex items-center justify-between cursor-pointer">
-                <span className="text-xs text-[#a0a0b8]">烧录字幕</span>
+                <span className="text-xs text-[#a0a0b8] group/tip relative cursor-help">
+                  烧录字幕 <span className="inline-block w-3 h-3 rounded-full bg-[#3a3a5a] text-[8px] text-center leading-3 ml-0.5">?</span>
+                  <span className="absolute left-0 bottom-full mb-1.5 w-44 p-2 bg-[#0f0f1a] border border-[#3a3a5a] rounded-lg text-[10px] leading-relaxed opacity-0 invisible group-hover/tip:opacity-100 group-hover/tip:visible transition-all z-50 shadow-xl">将字幕硬编码到视频中。关闭则单独输出字幕文件。</span>
+                </span>
                 <div className="relative">
                   <input
                     type="checkbox"
