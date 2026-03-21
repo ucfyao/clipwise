@@ -31,19 +31,35 @@ export async function cleanVideo(
   const keepSegments = segments.filter((s) => s.type === "keep");
   if (!keepSegments.length) throw new Error("No segments to keep");
 
+  // Merge adjacent keep segments to reduce cuts (and avoid keyframe drift)
+  const mergedSegments: { start: number; end: number }[] = [];
+  for (const seg of keepSegments) {
+    const last = mergedSegments[mergedSegments.length - 1];
+    if (last && Math.abs(seg.start - last.end) < 0.05) {
+      // Adjacent — extend the previous segment
+      last.end = seg.end;
+    } else {
+      mergedSegments.push({ start: seg.start, end: seg.end });
+    }
+  }
+
+  console.log(`[ffmpeg] ${keepSegments.length} keep segments merged to ${mergedSegments.length} cuts`);
+
   const concatPath = path.join(TEMP_DIR, `${taskId}-concat.txt`);
   const partPaths: string[] = [];
 
-  for (let i = 0; i < keepSegments.length; i++) {
-    const seg = keepSegments[i];
+  for (let i = 0; i < mergedSegments.length; i++) {
+    const seg = mergedSegments[i];
     const partPath = path.join(TEMP_DIR, `${taskId}-part${i}.mp4`);
     partPaths.push(partPath);
 
+    // Use re-encode for precise cuts (avoid keyframe drift that adds extra frames)
     await runFFmpeg([
       "-i", inputPath,
       "-ss", seg.start.toString(),
       "-to", seg.end.toString(),
-      "-c", "copy",
+      "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+      "-c:a", "aac", "-b:a", "128k",
       "-avoid_negative_ts", "make_zero",
       partPath,
     ]);
