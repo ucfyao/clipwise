@@ -1,6 +1,5 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { FilePicker } from "@/components/file-picker";
 import { VideoPreview } from "@/components/video-preview";
@@ -395,4 +394,4 @@ function Home() {
   );
 }
 
-export default dynamic(() => Promise.resolve(Home), { ssr: false });
+export default Home;
