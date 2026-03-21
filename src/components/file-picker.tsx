@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
-import { FolderOpen } from "lucide-react";
+import { Upload } from "lucide-react";
 
 interface FilePickerProps {
   onFileReady: (data: { filename: string; filepath: string; previewUrl: string; duration: number }) => void;
@@ -62,10 +62,11 @@ export function FilePicker({ onFileReady }: FilePickerProps) {
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4">
-        <div className="text-muted-foreground">读取中... {loadProgress}%</div>
-        <div className="w-48 h-1.5 bg-muted rounded-full overflow-hidden">
+        <div className="w-16 h-16 rounded-full border-4 border-[#252540] border-t-[#6366f1] animate-spin" />
+        <div className="text-[#a0a0b8] text-sm">读取中... {loadProgress}%</div>
+        <div className="w-56 h-1.5 bg-[#252540] rounded-full overflow-hidden">
           <div
-            className="h-full bg-primary rounded-full transition-all"
+            className="h-full bg-gradient-to-r from-[#6366f1] to-[#a855f7] rounded-full transition-all duration-300"
             style={{ width: `${loadProgress}%` }}
           />
         </div>
@@ -75,8 +76,10 @@ export function FilePicker({ onFileReady }: FilePickerProps) {
 
   return (
     <div
-      className={`flex flex-col items-center justify-center h-full border-2 border-dashed rounded-xl cursor-pointer transition-colors ${
-        isDragging ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"
+      className={`flex flex-col items-center justify-center w-full max-w-lg mx-auto border-3 border-dashed rounded-2xl cursor-pointer transition-all duration-300 py-20 px-8 ${
+        isDragging
+          ? "border-[#6366f1] bg-[#6366f1]/10 scale-[1.02]"
+          : "border-[#3a3a5a] bg-[#1a1a2e] hover:border-[#6366f1]/50 hover:bg-[#6366f1]/5"
       }`}
       onDragOver={(e) => {
         e.preventDefault();
@@ -96,10 +99,14 @@ export function FilePicker({ onFileReady }: FilePickerProps) {
           if (file) handleFile(file);
         }}
       />
-      <FolderOpen className="w-16 h-16 text-muted-foreground mb-4" />
-      <p className="text-lg text-muted-foreground">选择视频文件</p>
-      <p className="text-sm text-muted-foreground/60 mt-2">
-        点击或拖拽 · MP4, MOV, MKV, WebM, AVI · 最大 2GB
+      <div className={`w-20 h-20 rounded-2xl flex items-center justify-center mb-5 transition-all ${
+        isDragging ? "bg-[#6366f1] shadow-lg shadow-purple-500/30" : "bg-[#252540]"
+      }`}>
+        <Upload className={`w-10 h-10 transition-colors ${isDragging ? "text-white" : "text-[#a0a0b8]"}`} />
+      </div>
+      <p className="text-lg text-[#f0f0f5] font-medium mb-2">点击或拖拽视频文件到这里</p>
+      <p className="text-sm text-[#a0a0b8]/70">
+        支持 MP4, MOV, MKV, WebM, AVI · 最大 2GB
       </p>
     </div>
   );
