@@ -1,11 +1,11 @@
-"""Transcribe video using mlx-whisper (Apple GPU accelerated). Outputs JSON-lines progress to stdout."""
+"""Transcribe video using mlx-whisper (Apple GPU accelerated) with real progress."""
 import json
 import sys
 import os
 import time
-import threading
 
 import mlx_whisper
+import mlx_whisper.transcribe as _transcribe_module
 
 
 MODEL_MAP = {
@@ -37,35 +37,54 @@ def main():
     progress("transcribing", 8, message=f"文件大小: {file_size_mb:.1f}MB")
 
     try:
-        # Heartbeat thread — sends progress ticks while transcribing
-        # so the UI doesn't look frozen
-        transcribing = True
+        # Monkey-patch tqdm in mlx_whisper to get real progress
         start_time = time.time()
 
-        def heartbeat():
-            tick = 10
-            while transcribing:
-                elapsed = time.time() - start_time
-                # Slowly increment from 10% to 85% over time
-                pct = min(10 + int(elapsed * 2), 85)
-                progress("transcribing", pct, message=f"GPU 转录中... ({elapsed:.0f}s)")
-                time.sleep(3)
+        class ProgressTqdm:
+            """Fake tqdm that reports real progress via our callback."""
+            def __init__(self, *args, **kwargs):
+                self.total = kwargs.get("total", 0)
+                self.n = 0
+                progress("transcribing", 10, message="开始 GPU 转录...")
 
-        hb_thread = threading.Thread(target=heartbeat, daemon=True)
-        hb_thread.start()
+            def update(self, n):
+                self.n += n
+                if self.total > 0:
+                    pct = min(int((self.n / self.total) * 80) + 10, 90)
+                    elapsed = time.time() - start_time
+                    remaining = (elapsed / max(self.n, 1)) * (self.total - self.n)
+                    progress("transcribing", pct, message=f"GPU 转录中... {pct}% (剩余 {remaining:.0f}s)")
 
-        progress("transcribing", 10, message="开始 GPU 转录...")
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+        # Patch tqdm in the transcribe module
+        import tqdm as _tqdm_module
+        original_tqdm = _tqdm_module.tqdm
+        _tqdm_module.tqdm = ProgressTqdm
+        # Also patch it in mlx_whisper's transcribe module if it imported tqdm directly
+        if hasattr(_transcribe_module, "tqdm"):
+            _original_transcribe_tqdm = _transcribe_module.tqdm
+            _transcribe_module.tqdm = type("FakeTqdmModule", (), {"tqdm": ProgressTqdm})()
 
         result = mlx_whisper.transcribe(
             video_path,
             path_or_hf_repo=model_id,
             word_timestamps=True,
             language=None,
+            verbose=False,  # This enables tqdm (our patched version)
         )
 
-        transcribing = False
+        # Restore tqdm
+        _tqdm_module.tqdm = original_tqdm
+        if hasattr(_transcribe_module, "tqdm"):
+            _transcribe_module.tqdm = _original_transcribe_tqdm
+
         elapsed = time.time() - start_time
-        progress("transcribing", 88, message=f"转录完成 ({elapsed:.1f}s)，处理结果...")
+        progress("transcribing", 92, message=f"转录完成 ({elapsed:.1f}s)，处理结果...")
 
         output = {
             "language": result.get("language", "unknown"),
@@ -74,9 +93,9 @@ def main():
         }
 
         total_segments = len(result.get("segments", []))
-        progress("transcribing", 89, message=f"解析 {total_segments} 个语音段落...")
+        progress("transcribing", 94, message=f"解析 {total_segments} 个语音段落...")
 
-        for i, segment in enumerate(result.get("segments", [])):
+        for segment in result.get("segments", []):
             words = []
             if "words" in segment:
                 words = [
@@ -96,9 +115,8 @@ def main():
 
         detected_lang = output["language"]
         duration = output["duration"]
-        progress("transcribing", 95, message=f"语言: {detected_lang}, 时长: {duration:.0f}s, {total_segments} 段")
+        progress("transcribing", 97, message=f"语言: {detected_lang}, 时长: {duration:.0f}s, {total_segments} 段")
 
-        progress("transcribing", 97, message="写入转录文件...")
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(output, f, ensure_ascii=False, indent=2)
 

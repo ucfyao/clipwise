@@ -134,50 +134,126 @@ function detectSilenceFFmpeg(videoPath: string, silenceThreshold: number): Promi
   });
 }
 
+// Common Chinese filler words/phrases to detect
+const FILLER_PATTERNS = [
+  /^嗯+$/,
+  /^啊+$/,
+  /^哦+$/,
+  /^呃+$/,
+  /^额+$/,
+  /^那个$/,
+  /^就是$/,
+  /^就是说$/,
+  /^然后呢$/,
+  /^然后$/,
+  /^对吧$/,
+  /^对对对$/,
+  /^是吧$/,
+  /^这个$/,
+  /^怎么说呢$/,
+  /^你知道吗$/,
+  /^反正就是$/,
+];
+
+function isFillerText(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return FILLER_PATTERNS.some((p) => p.test(trimmed));
+}
+
 /**
- * Basic analysis without API — uses FFmpeg silencedetect on the original video.
- * Combines silence detection with Whisper transcript for text-aware segments.
+ * Detect filler words from Whisper transcript word-level timestamps.
+ * Returns segments where isolated filler words appear.
+ */
+function detectFillers(
+  tSegments: Array<{ start: number; end: number; text: string; words?: Array<{ word: string; start: number; end: number }> }>,
+  keepFillers: boolean
+): Array<{ start: number; end: number; text: string }> {
+  if (keepFillers) return [];
+
+  const fillers: Array<{ start: number; end: number; text: string }> = [];
+
+  for (const seg of tSegments) {
+    // Check if the entire segment is a filler
+    if (isFillerText(seg.text)) {
+      fillers.push({ start: seg.start, end: seg.end, text: seg.text });
+      continue;
+    }
+
+    // Check individual words if word-level timestamps exist
+    if (seg.words) {
+      for (const word of seg.words) {
+        if (isFillerText(word.word)) {
+          fillers.push({ start: word.start, end: word.end, text: word.word });
+        }
+      }
+    }
+  }
+
+  console.log(`[filler] Detected ${fillers.length} filler segments`);
+  return fillers;
+}
+
+/**
+ * Basic analysis without API — uses FFmpeg silencedetect + text-based filler detection.
+ * No API key needed.
  */
 export async function analyzeTranscriptBasic(
   transcriptPath: string,
   silenceThreshold: number,
-  videoPath?: string
+  videoPath?: string,
+  keepFillers: boolean = false
 ): Promise<AnalysisResult> {
   const raw = await fs.readFile(transcriptPath, "utf-8");
   const transcript = JSON.parse(raw);
   const duration = transcript.duration as number;
-  const tSegments = transcript.segments as Array<{ start: number; end: number; text: string }>;
+  const tSegments = transcript.segments as Array<{ start: number; end: number; text: string; words?: Array<{ word: string; start: number; end: number }> }>;
 
   if (!tSegments.length) {
     return { segments: [{ start: 0, end: duration, type: "silence" }] };
   }
 
-  // If we have the video path, use FFmpeg silencedetect for accurate detection
+  // Detect fillers from transcript text
+  const fillers = detectFillers(tSegments, keepFillers);
+
+  // If we have the video path, use FFmpeg silencedetect for accurate silence detection
   if (videoPath) {
     const silences = await detectSilenceFFmpeg(videoPath, silenceThreshold);
-    const segments: Segment[] = [];
 
-    // Build timeline: everything is "keep" unless overlapping with detected silence
+    // Merge silence + filler into one sorted list of "remove" intervals
+    const removeIntervals = [
+      ...silences.map((s) => ({ ...s, type: "silence" as const, reason: `静音 ${(s.end - s.start).toFixed(1)}s` })),
+      ...fillers.map((f) => ({ ...f, type: "filler" as const, reason: `填充词: ${f.text}` })),
+    ].sort((a, b) => a.start - b.start);
+
+    console.log(`[analyze] Total remove intervals: ${removeIntervals.length} (${silences.length} silence + ${fillers.length} filler)`);
+
+    // Build timeline: keep everything except remove intervals
+    const segments: Segment[] = [];
     let cursor = 0;
-    for (const silence of silences) {
-      if (silence.start > cursor) {
-        // Find text for this keep segment from transcript
+
+    for (const rm of removeIntervals) {
+      // Skip if this interval is before cursor (overlap with previous)
+      if (rm.end <= cursor) continue;
+      const effectiveStart = Math.max(rm.start, cursor);
+
+      if (effectiveStart > cursor) {
         const text = tSegments
-          .filter((t) => t.start < silence.start && t.end > cursor)
+          .filter((t) => t.start < effectiveStart && t.end > cursor)
           .map((t) => t.text)
           .join(" ");
-        segments.push({ start: cursor, end: silence.start, type: "keep", text });
+        segments.push({ start: cursor, end: effectiveStart, type: "keep", text });
       }
       segments.push({
-        start: silence.start,
-        end: silence.end,
-        type: "silence",
-        reason: `静音 ${(silence.end - silence.start).toFixed(1)}s`,
+        start: effectiveStart,
+        end: rm.end,
+        type: rm.type,
+        reason: rm.reason,
       });
-      cursor = silence.end;
+      cursor = rm.end;
     }
 
-    // Remaining after last silence
+    // Remaining after last remove interval
     if (cursor < duration) {
       const text = tSegments
         .filter((t) => t.end > cursor)
@@ -186,7 +262,6 @@ export async function analyzeTranscriptBasic(
       segments.push({ start: cursor, end: duration, type: "keep", text });
     }
 
-    // If no silence detected at all, keep everything
     if (segments.length === 0) {
       segments.push({ start: 0, end: duration, type: "keep" });
     }
