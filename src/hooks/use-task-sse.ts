@@ -27,18 +27,27 @@ export function useTaskSSE(taskId: string | null) {
   const retriesRef = useRef(0);
 
   useEffect(() => {
-    if (!taskId) return;
+    if (!taskId) {
+      console.log("[SSE] No taskId, skipping connection");
+      return;
+    }
 
     let disposed = false;
+    console.log(`[SSE] Connecting to /api/tasks/${taskId}/sse`);
 
     function connect() {
       if (disposed) return;
+      console.log(`[SSE] Opening EventSource (retry #${retriesRef.current})`);
 
       const source = new EventSource(`/api/tasks/${taskId}/sse`);
       sourceRef.current = source;
 
+      source.onopen = () => {
+        console.log("[SSE] Connection opened");
+      };
+
       source.onmessage = (event) => {
-        retriesRef.current = 0; // reset on successful message
+        retriesRef.current = 0;
         try {
           const data = JSON.parse(event.data);
 

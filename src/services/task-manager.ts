@@ -54,7 +54,8 @@ function notifyClips(taskId: string, clips: TimelineClip[]) {
 }
 
 function taskLog(taskId: string, message: string, level: "info" | "warn" | "error" = "info") {
-  const timestamp = new Date().toISOString().slice(11, 23);
+  const now = new Date();
+  const timestamp = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}.${now.getMilliseconds().toString().padStart(3, "0")}`;
   const line = `[${timestamp}] ${message}`;
   console.log(`[task:${taskId}] ${message}`);
   notifyListeners(taskId, { type: "log", level, message: line });

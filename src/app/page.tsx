@@ -36,7 +36,8 @@ function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const addLog = useCallback((message: string, level: "info" | "warn" | "error" = "info") => {
-    const timestamp = new Date().toISOString().slice(11, 23);
+    const now = new Date();
+    const timestamp = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
     setClientLogs((prev) => [...prev, { timestamp, level, message: `[${timestamp}] ${message}` }]);
   }, []);
 
