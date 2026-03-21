@@ -26,20 +26,29 @@ export function ResultPanel({ taskId, result, onReprocess }: ResultPanelProps) {
       <div className="space-y-2">
         {result.cleaned_video && (
           <a href={downloadUrl("cleaned")} className="flex items-center justify-between p-2.5 border rounded-lg hover:bg-muted/50 transition-colors">
-            <span className="text-sm">清理视频</span>
-            <Download className="w-4 h-4 text-muted-foreground" />
+            <div>
+              <span className="text-sm">去静音后的视频</span>
+              <span className="text-[10px] text-muted-foreground block">已去除静音和填充词段落</span>
+            </div>
+            <Download className="w-4 h-4 text-muted-foreground shrink-0" />
           </a>
         )}
         {result.srt_file && (
           <a href={downloadUrl("srt")} className="flex items-center justify-between p-2.5 border rounded-lg hover:bg-muted/50 transition-colors">
-            <span className="text-sm">SRT 字幕</span>
-            <Download className="w-4 h-4 text-muted-foreground" />
+            <div>
+              <span className="text-sm">纯文本字幕</span>
+              <span className="text-[10px] text-muted-foreground block">SRT 格式，兼容所有播放器</span>
+            </div>
+            <Download className="w-4 h-4 text-muted-foreground shrink-0" />
           </a>
         )}
         {result.subtitle_file && (
           <a href={downloadUrl("subtitle")} className="flex items-center justify-between p-2.5 border rounded-lg hover:bg-muted/50 transition-colors">
-            <span className="text-sm">ASS 字幕</span>
-            <Download className="w-4 h-4 text-muted-foreground" />
+            <div>
+              <span className="text-sm">动画字幕</span>
+              <span className="text-[10px] text-muted-foreground block">逐字高亮效果，适合短视频</span>
+            </div>
+            <Download className="w-4 h-4 text-muted-foreground shrink-0" />
           </a>
         )}
       </div>
