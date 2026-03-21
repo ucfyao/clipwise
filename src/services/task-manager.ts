@@ -21,11 +21,17 @@ async function ensureDirs() {
 }
 
 // --- SSE listener management ---
-const listeners = new Map<string, ((data: string) => void)[]>();
+// Use globalThis to survive HMR and ensure same instance across routes
+const globalListeners = globalThis as unknown as { __clipwise_sse_listeners?: Map<string, ((data: string) => void)[]> };
+if (!globalListeners.__clipwise_sse_listeners) {
+  globalListeners.__clipwise_sse_listeners = new Map();
+}
+const listeners = globalListeners.__clipwise_sse_listeners;
 
 export function addSSEListener(taskId: string, cb: (data: string) => void) {
   if (!listeners.has(taskId)) listeners.set(taskId, []);
   listeners.get(taskId)!.push(cb);
+  console.log(`[SSE] Listener added for ${taskId}, total: ${listeners.get(taskId)!.length}`);
 }
 
 export function removeSSEListener(taskId: string, cb: (data: string) => void) {
@@ -39,9 +45,12 @@ export function removeSSEListener(taskId: string, cb: (data: string) => void) {
 
 function notifyListeners(taskId: string, data: object) {
   const cbs = listeners.get(taskId);
-  if (cbs) {
+  if (cbs && cbs.length > 0) {
     const msg = `data: ${JSON.stringify(data)}\n\n`;
     cbs.forEach((cb) => cb(msg));
+  } else {
+    const dataType = (data as Record<string, unknown>).type || "update";
+    console.log(`[SSE] No listeners for ${taskId} (event: ${dataType}), listeners map size: ${listeners.size}`);
   }
 }
 
