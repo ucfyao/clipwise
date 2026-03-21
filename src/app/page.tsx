@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { FilePicker } from "@/components/file-picker";
 import { VideoPreview } from "@/components/video-preview";
@@ -22,7 +23,7 @@ interface VideoInfo {
   size: string;
 }
 
-export default function Home() {
+function Home() {
   const [pageStatus, setPageStatus] = useState<PageStatus>("idle");
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -368,3 +369,5 @@ export default function Home() {
     </div>
   );
 }
+
+export default dynamic(() => Promise.resolve(Home), { ssr: false });
