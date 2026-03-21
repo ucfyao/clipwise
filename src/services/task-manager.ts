@@ -3,6 +3,7 @@ import fs from "fs/promises";
 import path from "path";
 import { getTaskById, insertTask, updateTaskFields, listTasks as dbListTasks, deleteTask as dbDeleteTask } from "@/lib/db";
 import { Task, TaskConfig, TaskResult, DEFAULT_CONFIG } from "@/lib/schema";
+import type { TimelineSegment, TimelineClip } from "@/lib/schema";
 import { UPLOADS_DIR, TRANSCRIPTS_DIR, OUTPUTS_DIR, TEMP_DIR } from "@/lib/constants";
 import { transcribeVideo } from "./transcribe";
 import { analyzeTranscript, analyzeTranscriptBasic, AnalysisResult } from "./analyze";
@@ -42,6 +43,14 @@ function notifyListeners(taskId: string, data: object) {
     const msg = `data: ${JSON.stringify(data)}\n\n`;
     cbs.forEach((cb) => cb(msg));
   }
+}
+
+function notifySegments(taskId: string, segments: TimelineSegment[]) {
+  notifyListeners(taskId, { type: "segments", data: segments });
+}
+
+function notifyClips(taskId: string, clips: TimelineClip[]) {
+  notifyListeners(taskId, { type: "clips", data: clips });
 }
 
 // --- Task helpers ---
@@ -152,6 +161,30 @@ async function processTask(taskId: string) {
       }
     });
 
+    // After transcription, push initial speech/silence segments
+    const rawTranscript = JSON.parse(await fs.readFile(transcriptPath, "utf-8"));
+    const tSegments = rawTranscript.segments as Array<{ start: number; end: number; text: string }>;
+    const initialSegments: TimelineSegment[] = [];
+    for (let i = 0; i < tSegments.length; i++) {
+      if (i === 0 && tSegments[0].start > 0.5) {
+        initialSegments.push({ start: 0, end: tSegments[0].start, type: "silence" });
+      }
+      initialSegments.push({ start: tSegments[i].start, end: tSegments[i].end, type: "speech" });
+      if (i < tSegments.length - 1) {
+        const gap = tSegments[i + 1].start - tSegments[i].end;
+        if (gap > 0.5) {
+          initialSegments.push({ start: tSegments[i].end, end: tSegments[i + 1].start, type: "silence" });
+        }
+      }
+    }
+    if (tSegments.length > 0) {
+      const lastEnd = tSegments[tSegments.length - 1].end;
+      if (rawTranscript.duration - lastEnd > 0.5) {
+        initialSegments.push({ start: lastEnd, end: rawTranscript.duration, type: "silence" });
+      }
+    }
+    notifySegments(taskId, initialSegments);
+
     // === Step 2: Feature A — Clean ===
     if (task.mode === "clean" || task.mode === "both") {
       const hasApiKey = hasAIKey();
@@ -171,6 +204,15 @@ async function processTask(taskId: string) {
           config.silence_threshold
         );
       }
+
+      // Push classified segments after analysis
+      const classifiedSegments: TimelineSegment[] = analysis.segments.map((s) => ({
+        start: s.start,
+        end: s.end,
+        type: s.type,
+        reason: s.reason || (s.type === "silence" ? `静音 ${(s.end - s.start).toFixed(1)}s` : undefined),
+      }));
+      notifySegments(taskId, classifiedSegments);
 
       updateTask(taskId, { progress: 50, current_step: "Generating subtitles..." });
       const srtPath = await generateSRT(analysis.segments, path.join(OUTPUTS_DIR, `${taskId}.srt`));
@@ -197,6 +239,14 @@ async function processTask(taskId: string) {
       updateTask(taskId, { progress: 70, current_step: "Extracting highlights..." });
 
       const highlights = await extractHighlights(transcriptPath);
+
+      const timelineClips: TimelineClip[] = highlights.clips.map((c) => ({
+        start: c.start,
+        end: c.end,
+        title: c.title,
+        score: c.score,
+      }));
+      notifyClips(taskId, timelineClips);
 
       updateTask(taskId, { status: "processing", progress: 75, current_step: "Cutting clips..." });
       result.clips = [];
