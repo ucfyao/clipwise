@@ -260,8 +260,8 @@ async function processTask(taskId: string) {
       const srtPath = await generateSRT(analysis.segments, path.join(OUTPUTS_DIR, `${taskId}.srt`));
       result.srt_file = srtPath;
 
-      // Also generate animated ASS subtitle
-      const assPath = await generateAnimatedASS(transcriptPath, path.join(OUTPUTS_DIR, `${taskId}.ass`), config.subtitle_style);
+      // Also generate animated ASS subtitle (pass segments for timeline remapping)
+      const assPath = await generateAnimatedASS(transcriptPath, path.join(OUTPUTS_DIR, `${taskId}.ass`), config.subtitle_style, analysis.segments);
       result.subtitle_file = assPath; // Prefer ASS over SRT
 
       taskLog(taskId, `Subtitles generated: SRT=${srtPath}, ASS=${assPath}`);

@@ -23,6 +23,72 @@ function runFFmpeg(args: string[]): Promise<void> {
   });
 }
 
+/** Run FFmpeg and return stderr (for parsing loudnorm stats, etc.) */
+function runFFmpegCapture(args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    console.log(`[ffmpeg] Measuring: ffmpeg ${args.join(" ").slice(0, 200)}...`);
+    const proc = spawn("ffmpeg", ["-y", ...args], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stderr = "";
+    proc.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    proc.on("close", (code) => {
+      if (code === 0) resolve(stderr);
+      else reject(new Error(`FFmpeg failed (code ${code}): ${stderr.slice(-500)}`));
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Loudnorm dual-pass: measure first, then apply with measured values
+// ---------------------------------------------------------------------------
+
+interface LoudnormStats {
+  input_i: string;
+  input_tp: string;
+  input_lra: string;
+  input_thresh: string;
+  target_offset: string;
+}
+
+/**
+ * Measure audio loudness using loudnorm in print_format=json mode.
+ * Returns stats needed for the second (linear) pass.
+ */
+async function measureLoudnorm(
+  inputPath: string,
+  seekStart?: number,
+  duration?: number,
+): Promise<LoudnormStats | null> {
+  try {
+    const args: string[] = [];
+    if (seekStart !== undefined) args.push("-ss", seekStart.toString());
+    args.push("-i", inputPath);
+    if (duration !== undefined) args.push("-t", duration.toString());
+    args.push("-af", "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json", "-f", "null", "-");
+
+    const stderr = await runFFmpegCapture(args);
+
+    // Extract JSON block from stderr
+    const jsonMatch = stderr.match(/\{[\s\S]*?"input_i"[\s\S]*?\}/);
+    if (!jsonMatch) return null;
+
+    const stats = JSON.parse(jsonMatch[0]);
+    return {
+      input_i: stats.input_i,
+      input_tp: stats.input_tp,
+      input_lra: stats.input_lra,
+      input_thresh: stats.input_thresh,
+      target_offset: stats.target_offset,
+    };
+  } catch {
+    console.log("[ffmpeg] Loudnorm measurement failed, falling back to single-pass");
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Enhancement filter builder
 // ---------------------------------------------------------------------------
@@ -32,19 +98,28 @@ interface EnhancementFilters {
   videoFilters: string[];
 }
 
-function buildEnhancementFilters(config: TaskConfig): EnhancementFilters {
+function buildEnhancementFilters(
+  config: TaskConfig,
+  loudnormStats?: LoudnormStats | null,
+): EnhancementFilters {
   const audioFilters: string[] = [];
   const videoFilters: string[] = [];
 
-  // Denoise (applied first — values calibrated to avoid artifacts)
+  // Denoise (applied first) — afftdn with recalibrated per-intensity noise floors
   if (config.denoise !== "off") {
-    const nfMap = { light: -20, medium: -30, strong: -40 } as const;
+    const nfMap = { light: -15, medium: -25, strong: -35 } as const;
     audioFilters.push(`afftdn=nf=${nfMap[config.denoise]}`);
   }
 
-  // Normalize (after denoise) — single-pass loudnorm, acceptable quality
+  // Normalize (after denoise) — dual-pass loudnorm if stats available
   if (config.normalize_audio) {
-    audioFilters.push("loudnorm=I=-16:TP=-1.5:LRA=11");
+    if (loudnormStats) {
+      audioFilters.push(
+        `loudnorm=I=-16:TP=-1.5:LRA=11:measured_I=${loudnormStats.input_i}:measured_TP=${loudnormStats.input_tp}:measured_LRA=${loudnormStats.input_lra}:measured_thresh=${loudnormStats.input_thresh}:offset=${loudnormStats.target_offset}:linear=true`
+      );
+    } else {
+      audioFilters.push("loudnorm=I=-16:TP=-1.5:LRA=11");
+    }
   }
 
   // Speed
@@ -99,8 +174,14 @@ export async function cleanVideo(
   );
 
   // --- Enhancement filters ---
+  // Run loudnorm measurement pass if normalization is enabled
+  let loudnormStats: LoudnormStats | null = null;
+  if (config?.normalize_audio) {
+    loudnormStats = await measureLoudnorm(inputPath);
+  }
+
   const { audioFilters, videoFilters } = config
-    ? buildEnhancementFilters(config)
+    ? buildEnhancementFilters(config, loudnormStats)
     : { audioFilters: [] as string[], videoFilters: [] as string[] };
 
   const fadeConfig = config?.fade;
@@ -155,12 +236,14 @@ export async function cleanVideo(
   const filterComplex = filterParts.join(";");
 
   await runFFmpeg([
+    "-hwaccel", "videotoolbox",
     "-i", inputPath,
     "-filter_complex", filterComplex,
     "-map", `[${currentVideoLabel}]`,
     "-map", `[${currentAudioLabel}]`,
-    "-c:v", "h264_videotoolbox", "-q:v", "65",
+    "-c:v", "h264_videotoolbox", "-b:v", "8M",
     "-c:a", "aac", "-b:a", "128k",
+    "-max_muxing_queue_size", "1024",
     outputPath,
   ]);
 
@@ -184,17 +267,20 @@ export async function extractClip(
 ): Promise<string> {
   const outputPath = path.join(OUTPUTS_DIR, `${taskId}-clip${clipIndex}.mp4`);
 
+  // Loudnorm measurement scoped to this clip's audio range
+  let loudnormStats: LoudnormStats | null = null;
+  if (config?.normalize_audio) {
+    loudnormStats = await measureLoudnorm(inputPath, clip.start, clip.end - clip.start);
+  }
+
   const { audioFilters, videoFilters } = config
-    ? buildEnhancementFilters(config)
+    ? buildEnhancementFilters(config, loudnormStats)
     : { audioFilters: [] as string[], videoFilters: [] as string[] };
 
   const fadeConfig = config?.fade;
   const speed = config?.speed ?? 1;
-
-  // Compute clip duration after speed adjustment
   const clipDuration = (clip.end - clip.start) / (speed || 1);
 
-  // Build fade filters
   const videoFadeFilters: string[] = [];
   const audioFadeFilters: string[] = [];
   if (fadeConfig?.enabled && fadeConfig.duration > 0) {
@@ -203,41 +289,38 @@ export async function extractClip(
     audioFadeFilters.push(`afade=t=in:d=${d},afade=t=out:st=${(clipDuration - d).toFixed(3)}:d=${d}`);
   }
 
-  // --- First call: re-encode with audio enhancements ---
-  const firstCallArgs = [
-    "-i", inputPath,
+  // Single-pass: crop + video enhancements + audio enhancements in one filter_complex
+  // -ss before -i for fast input seeking, -t for duration (since timestamps reset to 0)
+  const allVideoFilters = ["crop=ih*9/16:ih", ...videoFilters, ...videoFadeFilters];
+  const allAudioFilters = [...audioFilters, ...audioFadeFilters];
+
+  const args = [
+    "-hwaccel", "videotoolbox",
     "-ss", clip.start.toString(),
-    "-to", clip.end.toString(),
-    "-c:v", "h264_videotoolbox", "-q:v", "65",
+    "-i", inputPath,
+    "-t", (clip.end - clip.start).toString(),
   ];
 
-  const allAudioFilters = [...audioFilters, ...audioFadeFilters];
-  if (allAudioFilters.length > 0) {
-    firstCallArgs.push("-af", allAudioFilters.join(","));
+  if (allVideoFilters.length > 0 || allAudioFilters.length > 0) {
+    const filterParts: string[] = [];
+    if (allVideoFilters.length > 0) {
+      filterParts.push(`[0:v]${allVideoFilters.join(",")}[outv]`);
+    }
+    if (allAudioFilters.length > 0) {
+      filterParts.push(`[0:a]${allAudioFilters.join(",")}[outa]`);
+    }
+    args.push("-filter_complex", filterParts.join(";"));
+    args.push("-map", allVideoFilters.length > 0 ? "[outv]" : "0:v");
+    args.push("-map", allAudioFilters.length > 0 ? "[outa]" : "0:a");
   }
 
-  firstCallArgs.push("-c:a", "aac", "-b:a", "128k");
-  firstCallArgs.push(outputPath);
+  args.push(
+    "-c:v", "h264_videotoolbox", "-b:v", "8M",
+    "-c:a", "aac", "-b:a", "128k",
+    "-max_muxing_queue_size", "1024",
+    outputPath
+  );
 
-  await runFFmpeg(firstCallArgs);
-
-  // --- Second call: vertical crop + video enhancements ---
-  const croppedPath = path.join(OUTPUTS_DIR, `${taskId}-clip${clipIndex}-vertical.mp4`);
-
-  const allVideoFilters = ["crop=ih*9/16:ih", ...videoFilters, ...videoFadeFilters];
-  const secondCallArgs = [
-    "-i", outputPath,
-    "-vf", allVideoFilters.join(","),
-  ];
-
-  // If audio filters were applied in step 1, audio is already re-encoded; copy it
-  secondCallArgs.push("-c:a", "copy");
-  secondCallArgs.push(croppedPath);
-
-  await runFFmpeg(secondCallArgs);
-
-  await fs.unlink(outputPath).catch(() => {});
-  await fs.rename(croppedPath, outputPath);
-
+  await runFFmpeg(args);
   return outputPath;
 }
