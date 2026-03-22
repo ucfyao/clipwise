@@ -1,9 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ClipCard } from "@/components/clip-card";
 import { CopyPanel } from "@/components/copy-panel";
-import { Download, FolderOpen, RotateCcw } from "lucide-react";
+import { Download, FolderOpen, RotateCcw, Image, Film, Music, FileDown } from "lucide-react";
 import type { TaskResult } from "@/lib/schema";
 
 interface ResultPanelProps {
@@ -13,7 +14,33 @@ interface ResultPanelProps {
 }
 
 export function ResultPanel({ taskId, result, onReprocess }: ResultPanelProps) {
+  const [exporting, setExporting] = useState<string | null>(null);
+  const [exportResults, setExportResults] = useState<Record<string, { filename: string; downloadUrl: string }>>({});
+  const [thumbnailTime, setThumbnailTime] = useState("");
+  const [gifStart, setGifStart] = useState(0);
+  const [gifDuration, setGifDuration] = useState(5);
+  const [audioFormat, setAudioFormat] = useState<"mp3" | "aac">("mp3");
+  const [compressQuality, setCompressQuality] = useState<"high" | "medium" | "low">("medium");
+
   const downloadUrl = (type: string) => `/api/tasks/${taskId}/download?type=${type}`;
+
+  const handleExport = async (tool: string, options: Record<string, unknown>) => {
+    setExporting(tool);
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/export`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool, options }),
+      });
+      if (!res.ok) throw new Error("Export failed");
+      const data = await res.json();
+      setExportResults((prev) => ({ ...prev, [tool]: data }));
+    } catch {
+      // Could add error toast here
+    } finally {
+      setExporting(null);
+    }
+  };
 
   const openInFinder = async () => {
     await fetch(`/api/tasks/${taskId}/open`, { method: "POST" });
@@ -74,6 +101,156 @@ export function ResultPanel({ taskId, result, onReprocess }: ResultPanelProps) {
       {result.copy && result.copy.length > 0 && (
         <CopyPanel copies={result.copy} />
       )}
+
+      {/* 导出工具 */}
+      <div>
+        <h4 className="text-sm font-medium mb-2">导出工具</h4>
+        <div className="space-y-2">
+          {/* 提取封面 */}
+          <div className="p-2.5 border rounded-lg">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Image className="w-3.5 h-3.5 text-muted-foreground" />
+              <span className="text-sm">提取封面</span>
+            </div>
+            <p className="text-[10px] text-muted-foreground mb-2">从视频中截取一帧作为封面图</p>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                placeholder="自动"
+                value={thumbnailTime}
+                onChange={(e) => setThumbnailTime(e.target.value)}
+                className="w-16 bg-muted border rounded px-2 py-1 text-xs"
+              />
+              <span className="text-[10px] text-muted-foreground">秒</span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                disabled={exporting === "thumbnail"}
+                onClick={() => handleExport("thumbnail", { time: thumbnailTime ? Number(thumbnailTime) : undefined })}
+              >
+                {exporting === "thumbnail" ? "处理中..." : "提取"}
+              </Button>
+              {exportResults.thumbnail && (
+                <a href={exportResults.thumbnail.downloadUrl} className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+                  <Download className="w-3.5 h-3.5" />
+                  <span>JPG</span>
+                </a>
+              )}
+            </div>
+          </div>
+
+          {/* 生成 GIF */}
+          <div className="p-2.5 border rounded-lg">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Film className="w-3.5 h-3.5 text-muted-foreground" />
+              <span className="text-sm">生成 GIF</span>
+            </div>
+            <p className="text-[10px] text-muted-foreground mb-2">将视频片段转为 GIF 动图</p>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                value={gifStart}
+                onChange={(e) => setGifStart(Number(e.target.value))}
+                className="w-14 bg-muted border rounded px-2 py-1 text-xs"
+              />
+              <span className="text-[10px] text-muted-foreground">秒起</span>
+              <input
+                type="number"
+                value={gifDuration}
+                max={10}
+                onChange={(e) => setGifDuration(Number(e.target.value))}
+                className="w-14 bg-muted border rounded px-2 py-1 text-xs"
+              />
+              <span className="text-[10px] text-muted-foreground">秒长</span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                disabled={exporting === "gif"}
+                onClick={() => handleExport("gif", { start: gifStart, duration: gifDuration })}
+              >
+                {exporting === "gif" ? "处理中..." : "生成"}
+              </Button>
+              {exportResults.gif && (
+                <a href={exportResults.gif.downloadUrl} className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+                  <Download className="w-3.5 h-3.5" />
+                  <span>GIF</span>
+                </a>
+              )}
+            </div>
+          </div>
+
+          {/* 提取音频 */}
+          <div className="p-2.5 border rounded-lg">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Music className="w-3.5 h-3.5 text-muted-foreground" />
+              <span className="text-sm">提取音频</span>
+            </div>
+            <p className="text-[10px] text-muted-foreground mb-2">从视频中提取音频轨道</p>
+            <div className="flex items-center gap-2">
+              <select
+                value={audioFormat}
+                onChange={(e) => setAudioFormat(e.target.value as "mp3" | "aac")}
+                className="bg-muted border rounded px-2 py-1 text-xs"
+              >
+                <option value="mp3">MP3</option>
+                <option value="aac">AAC</option>
+              </select>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                disabled={exporting === "audio"}
+                onClick={() => handleExport("audio", { format: audioFormat })}
+              >
+                {exporting === "audio" ? "处理中..." : "提取"}
+              </Button>
+              {exportResults.audio && (
+                <a href={exportResults.audio.downloadUrl} className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+                  <Download className="w-3.5 h-3.5" />
+                  <span>{exportResults.audio.filename}</span>
+                </a>
+              )}
+            </div>
+          </div>
+
+          {/* 视频压缩 */}
+          <div className="p-2.5 border rounded-lg">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <FileDown className="w-3.5 h-3.5 text-muted-foreground" />
+              <span className="text-sm">视频压缩</span>
+            </div>
+            <p className="text-[10px] text-muted-foreground mb-2">压缩视频文件体积</p>
+            <div className="flex items-center gap-2">
+              <select
+                value={compressQuality}
+                onChange={(e) => setCompressQuality(e.target.value as "high" | "medium" | "low")}
+                className="bg-muted border rounded px-2 py-1 text-xs"
+              >
+                <option value="high">高质量</option>
+                <option value="medium">中等</option>
+                <option value="low">低质量</option>
+              </select>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                disabled={exporting === "compress"}
+                onClick={() => handleExport("compress", { quality: compressQuality })}
+              >
+                {exporting === "compress" ? "处理中..." : "压缩"}
+              </Button>
+              {exportResults.compress && (
+                <a href={exportResults.compress.downloadUrl} className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+                  <Download className="w-3.5 h-3.5" />
+                  <span>{exportResults.compress.filename}</span>
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div className="mt-auto space-y-2 pt-4">
         <a href={downloadUrl("all")} className="block">
