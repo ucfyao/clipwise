@@ -38,6 +38,7 @@ function Home() {
   const [fadeEnabled, setFadeEnabled] = useState(false);
   const [fadeDuration, setFadeDuration] = useState(1);
   const [clientLogs, setClientLogs] = useState<LogEntry[]>([]);
+  const [waveformUrl, setWaveformUrl] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const addLog = useCallback((message: string, level: "info" | "warn" | "error" = "info") => {
@@ -80,6 +81,18 @@ function Home() {
       addLog(`视频信息: ${video.videoWidth}x${video.videoHeight}, ${Math.floor(data.duration)}s`);
       addLog("准备就绪，等待开始处理");
       setPageStatus("uploaded");
+
+      // Generate waveform in background
+      fetch("/api/waveform", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filepath: data.filepath }),
+      })
+        .then((res) => res.json())
+        .then((result) => {
+          if (result.dataUrl) setWaveformUrl(result.dataUrl);
+        })
+        .catch(() => {}); // Non-critical, ignore errors
     };
     video.src = data.previewUrl;
   }, [addLog]);
@@ -136,6 +149,7 @@ function Home() {
     setVideoInfo(null);
     setTaskResult(null);
     setTaskId(null);
+    setWaveformUrl(null);
     resetSSE();
   }, [resetSSE]);
 
@@ -457,6 +471,7 @@ function Home() {
               duration={videoInfo.duration}
               segments={segments}
               clips={clips}
+              waveformUrl={waveformUrl}
             />
           )}
         </main>
