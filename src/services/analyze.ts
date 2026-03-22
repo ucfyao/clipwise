@@ -81,20 +81,54 @@ Requirements:
 }
 
 /**
- * Detect silence using FFmpeg's silencedetect filter (audio waveform analysis).
- * Much more accurate than Whisper timestamp gaps.
+ * Measure the mean volume of a video's audio track using FFmpeg volumedetect.
+ * Returns the mean volume in dB (e.g., -25.3).
  */
-function detectSilenceFFmpeg(videoPath: string, silenceThreshold: number): Promise<Array<{ start: number; end: number }>> {
+function measureNoiseFloor(videoPath: string): Promise<number> {
   return new Promise((resolve, reject) => {
-    // silenceThreshold controls minimum duration
-    // -20dB is a good noise floor for typical recordings with some background noise
-    // -30dB is too sensitive (misses silence in noisy recordings)
-    // -20dB catches pauses even with ambient noise
-    const noisedB = "-20dB";
-    const minDuration = Math.max(silenceThreshold * 0.3, 0.3); // Use 30% of user threshold as min duration for more aggressive detection
+    const proc = spawn("ffmpeg", [
+      "-i", videoPath,
+      "-af", "volumedetect",
+      "-f", "null", "-",
+    ], { stdio: ["pipe", "pipe", "pipe"] });
 
-    console.log(`[silencedetect] Running: noise=${noisedB}, min_duration=${minDuration}s`);
+    let stderr = "";
+    proc.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
 
+    proc.on("close", (code) => {
+      if (code !== 0 && code !== null) {
+        resolve(-20); // fallback
+        return;
+      }
+      const meanMatch = stderr.match(/mean_volume:\s*([-\d.]+)\s*dB/);
+      if (meanMatch) {
+        const meanVol = parseFloat(meanMatch[1]);
+        // Set silence threshold ~20dB below mean volume
+        // This adapts to the actual recording level
+        const threshold = Math.min(meanVol - 20, -20);
+        console.log(`[volumedetect] mean=${meanVol}dB → silence threshold=${threshold}dB`);
+        resolve(threshold);
+      } else {
+        resolve(-20); // fallback
+      }
+    });
+  });
+}
+
+/**
+ * Detect silence using FFmpeg's silencedetect filter (audio waveform analysis).
+ * Dynamically measures noise floor for adaptive threshold.
+ */
+async function detectSilenceFFmpeg(videoPath: string, silenceThreshold: number): Promise<Array<{ start: number; end: number }>> {
+  const noiseFloor = await measureNoiseFloor(videoPath);
+  const noisedB = `${noiseFloor}dB`;
+  const minDuration = Math.max(silenceThreshold * 0.3, 0.3);
+
+  console.log(`[silencedetect] Running: noise=${noisedB} (adaptive), min_duration=${minDuration}s`);
+
+  return new Promise((resolve, reject) => {
     const proc = spawn("ffmpeg", [
       "-i", videoPath,
       "-af", `silencedetect=n=${noisedB}:d=${minDuration}`,
