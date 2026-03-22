@@ -482,46 +482,86 @@ function Home() {
           )}
         </main>
 
-        {/* RIGHT: Status/Results panel */}
+        {/* RIGHT: Fixed-layout panel — content accumulates, never replaces */}
         <aside className="w-[280px] bg-[#1a1a2e] border-l border-[#3a3a5a] flex flex-col min-h-0">
-          {/* Top section — scrollable status content */}
-          <div className="shrink-0 overflow-y-auto" style={{ maxHeight: pageStatus === "processing" ? "45%" : "100%" }}>
+          {/* Status bar — always visible */}
+          <div className="px-4 py-2.5 border-b border-[#3a3a5a] flex items-center gap-2">
             {pageStatus === "idle" && (
-              <div className="p-5 text-xs text-[#a0a0b8] space-y-3">
-                <div className="p-4 rounded-xl bg-gradient-to-br from-[#252540] to-[#1e1b4b] border border-[#3a3a5a]">
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-[#a0a0b8]" />
+                <span className="text-xs text-[#a0a0b8]">等待选择文件</span>
+              </>
+            )}
+            {pageStatus === "uploaded" && (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                <span className="text-xs text-[#f0f0f5]">就绪 — 点击「开始处理」</span>
+              </>
+            )}
+            {pageStatus === "processing" && (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse" />
+                <span className="text-xs text-[#f0f0f5]">{task?.current_step || "处理中..."}</span>
+                <span className="text-xs text-[#6366f1] ml-auto">{task?.progress ?? 0}%</span>
+              </>
+            )}
+            {pageStatus === "failed" && (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                <span className="text-xs text-red-400 truncate flex-1">失败</span>
+                <button onClick={handleReprocess} className="text-[10px] text-[#6366f1] hover:underline ml-auto shrink-0">重试</button>
+              </>
+            )}
+            {pageStatus === "done" && (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                <span className="text-xs text-green-400">处理完成</span>
+              </>
+            )}
+          </div>
+
+          {/* Scrollable content area */}
+          <div className="flex-1 overflow-y-auto min-h-0">
+            {/* Idle hints */}
+            {pageStatus === "idle" && (
+              <div className="p-4 text-xs text-[#a0a0b8] space-y-3">
+                <div className="p-3 rounded-xl bg-gradient-to-br from-[#252540] to-[#1e1b4b] border border-[#3a3a5a]">
                   <p className="font-semibold text-sm text-[#f0f0f5] mb-2">AI 视频处理工作台</p>
                   <p className="leading-relaxed">选择视频文件开始。ClipWise 会自动分析并处理你的视频。</p>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-blue-500" />蓝色 = 有语音内容</div>
                   <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-red-500" />红色 = 将被删除</div>
                   <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-green-400" />绿色 = 高光片段</div>
                 </div>
               </div>
             )}
-            {pageStatus === "uploaded" && (
-              <div className="p-5 text-xs text-[#a0a0b8]">
-                <div className="p-4 rounded-xl bg-[#252540] border border-[#3a3a5a]">
-                  <p className="font-semibold text-sm text-[#f0f0f5] mb-1">准备就绪</p>
-                  <p>调整左侧参数后点击「开始处理」</p>
-                </div>
-              </div>
-            )}
+
+            {/* Processing progress — visible during processing, collapses to summary when done */}
             {(pageStatus === "processing" || pageStatus === "failed") && (
               <ProcessingPanel task={task} segments={segments} />
             )}
-            {pageStatus === "failed" && (
-              <div className="p-4 border-t border-[#3a3a5a]">
-                <p className="text-xs text-red-400 mb-2">{task?.error || "处理失败"}</p>
-                <Button
-                  size="sm"
-                  className="w-full bg-[#252540] border border-[#3a3a5a] hover:bg-[#6366f1] text-xs"
-                  onClick={handleReprocess}
-                >
-                  重试
-                </Button>
+            {pageStatus === "done" && segments.length > 0 && (
+              <div className="mx-4 mt-3 p-2.5 rounded-lg bg-[#252540] border border-[#3a3a5a] text-xs text-[#a0a0b8]">
+                <div className="flex justify-between">
+                  <span>检测到</span>
+                  <span>{segments.filter((s) => s.type === "silence" || s.type === "filler").length} 段静音/填充词</span>
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span>已删除</span>
+                  <span>{segments.filter((s) => s.type === "silence" || s.type === "filler").reduce((a, s) => a + (s.end - s.start), 0).toFixed(1)}s</span>
+                </div>
               </div>
             )}
+
+            {/* Error message */}
+            {pageStatus === "failed" && (
+              <div className="mx-4 mt-2 p-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">
+                {task?.error || "处理失败"}
+              </div>
+            )}
+
+            {/* Results — appears when done, never replaces processing info */}
             {pageStatus === "done" && taskResult && taskId && (
               <ResultPanel
                 taskId={taskId}
@@ -530,9 +570,10 @@ function Home() {
               />
             )}
           </div>
-          {/* Bottom section — log terminal, always visible except idle */}
+
+          {/* Log terminal — always at bottom, visible once started */}
           {pageStatus !== "idle" && (
-            <div className="flex-1 min-h-[200px] p-3 pt-0">
+            <div className="shrink-0 h-[200px] border-t border-[#3a3a5a] p-3 pt-2">
               <LogTerminal logs={localLogs} />
             </div>
           )}
