@@ -24,7 +24,7 @@ export interface TaskConfig {
   trim?: { start: number; end: number };
   normalize_audio: boolean;
   denoise: "off" | "light" | "medium" | "strong";
-  speed: 1 | 1.25 | 1.5 | 2;
+  speed: number;
   fade: { enabled: boolean; duration: number };
 }
 
