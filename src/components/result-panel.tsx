@@ -47,9 +47,7 @@ export function ResultPanel({ taskId, result, onReprocess }: ResultPanelProps) {
   };
 
   return (
-    <div className="flex flex-col gap-4 p-4 overflow-y-auto h-full">
-      <div className="text-sm font-medium text-green-500">处理完成</div>
-
+    <div className="flex flex-col gap-4 p-4">
       <div className="space-y-2">
         {result.cleaned_video && (
           <a href={downloadUrl("cleaned")} className="flex items-center justify-between p-2.5 border rounded-lg hover:bg-muted/50 transition-colors">
@@ -252,7 +250,7 @@ export function ResultPanel({ taskId, result, onReprocess }: ResultPanelProps) {
         </div>
       </div>
 
-      <div className="mt-auto space-y-2 pt-4">
+      <div className="space-y-2 pt-2">
         <a href={downloadUrl("all")} className="block">
           <Button variant="outline" className="w-full">
             <Download className="w-4 h-4 mr-2" />
