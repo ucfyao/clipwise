@@ -52,7 +52,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       ".mp4": "video/mp4",
     };
 
-    return new NextResponse(exportBuffer.buffer.slice(exportBuffer.byteOffset, exportBuffer.byteOffset + exportBuffer.byteLength) as ArrayBuffer, {
+    return new NextResponse(new Uint8Array(exportBuffer), {
       headers: {
         "Content-Type": contentTypes[ext] || "application/octet-stream",
         "Content-Disposition": `attachment; filename="${basename}"`,
@@ -62,7 +62,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   if (type === "cleaned" && result.cleaned_video) {
     const buffer = await fs.readFile(result.cleaned_video);
-    return new NextResponse(buffer, {
+    return new NextResponse(new Uint8Array(buffer), {
       headers: {
         "Content-Type": "video/mp4",
         "Content-Disposition": `attachment; filename="${task.filename.replace(/\.\w+$/, "")}-cleaned.mp4"`,
@@ -95,7 +95,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   await new Promise<void>((resolve) => archive.on("end", resolve));
 
   const buffer = Buffer.concat(chunks);
-  return new NextResponse(buffer, {
+  return new NextResponse(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/zip",
       "Content-Disposition": `attachment; filename="${task.filename.replace(/\.\w+$/, "")}-clipwise.zip"`,
