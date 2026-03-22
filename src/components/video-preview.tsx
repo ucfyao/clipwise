@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useState } from "react";
+import { forwardRef, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 
 interface VideoPreviewProps {
@@ -11,6 +11,11 @@ interface VideoPreviewProps {
 export const VideoPreview = forwardRef<HTMLVideoElement, VideoPreviewProps>(
   function VideoPreview({ previewUrl, cleanedVideoUrl }, ref) {
     const [showCleaned, setShowCleaned] = useState(false);
+
+    // Auto-switch to cleaned video when it becomes available
+    useEffect(() => {
+      if (cleanedVideoUrl) setShowCleaned(true);
+    }, [cleanedVideoUrl]);
     const currentUrl = showCleaned && cleanedVideoUrl ? cleanedVideoUrl : previewUrl;
 
     return (

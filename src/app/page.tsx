@@ -34,7 +34,7 @@ function Home() {
   const [burnSubtitles, setBurnSubtitles] = useState(false);
   const [normalizeAudio, setNormalizeAudio] = useState(false);
   const [denoise, setDenoise] = useState<"off" | "light" | "medium" | "strong">("off");
-  const [speed, setSpeed] = useState<1 | 1.25 | 1.5 | 2>(1);
+  const [speed, setSpeed] = useState(1);
   const [fadeEnabled, setFadeEnabled] = useState(false);
   const [fadeDuration, setFadeDuration] = useState(1);
   const [clientLogs, setClientLogs] = useState<LogEntry[]>([]);
@@ -154,7 +154,7 @@ function Home() {
   }, [resetSSE]);
 
   const cleanedVideoUrl = taskResult?.cleaned_video
-    ? `/api/tasks/${taskId}/download?type=cleaned`
+    ? `/api/tasks/${taskId}/stream`
     : undefined;
 
   const isProcessing = pageStatus === "processing";
@@ -367,18 +367,24 @@ function Home() {
 
               {/* Speed */}
               <div>
-                <span className="text-xs text-[#a0a0b8] block mb-1.5">播放速度</span>
-                <select
+                <div className="flex justify-between mb-2">
+                  <span className="text-xs text-[#a0a0b8]">播放速度</span>
+                  <span className="text-xs text-[#6366f1] font-medium">{speed === 1 ? "原速" : `${speed}x`}</span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max="2"
+                  step="0.05"
                   value={speed}
-                  onChange={(e) => setSpeed(Number(e.target.value) as 1 | 1.25 | 1.5 | 2)}
+                  onChange={(e) => setSpeed(Number(e.target.value))}
                   disabled={isProcessing}
-                  className="w-full bg-[#252540] border border-[#3a3a5a] rounded-lg px-3 py-2 text-xs text-[#f0f0f5] focus:border-[#6366f1] focus:outline-none disabled:opacity-50"
-                >
-                  <option value={1}>1x (原速)</option>
-                  <option value={1.25}>1.25x</option>
-                  <option value={1.5}>1.5x</option>
-                  <option value={2}>2x</option>
-                </select>
+                  className="w-full h-1.5 rounded-full appearance-none bg-[#252540] accent-[#6366f1] cursor-pointer disabled:opacity-50"
+                />
+                <div className="flex justify-between mt-1">
+                  <span className="text-[10px] text-[#a0a0b8]/60">1x</span>
+                  <span className="text-[10px] text-[#a0a0b8]/60">2x</span>
+                </div>
               </div>
 
               {/* Fade in/out */}
