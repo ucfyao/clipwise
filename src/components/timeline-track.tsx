@@ -9,6 +9,7 @@ interface TimelineTrackProps {
   clips: TimelineClip[];
   currentTime: number;
   onSeek: (time: number) => void;
+  waveformUrl?: string | null;
 }
 
 const SEGMENT_COLORS: Record<TimelineSegment["type"], string> = {
@@ -18,7 +19,7 @@ const SEGMENT_COLORS: Record<TimelineSegment["type"], string> = {
   filler: "bg-orange-500/50",
 };
 
-export function TimelineTrack({ duration, segments, clips, currentTime, onSeek }: TimelineTrackProps) {
+export function TimelineTrack({ duration, segments, clips, currentTime, onSeek, waveformUrl }: TimelineTrackProps) {
   const rulers = useMemo(() => {
     if (duration <= 0) return [];
     const count = Math.min(Math.ceil(duration / 30), 10);
@@ -51,6 +52,13 @@ export function TimelineTrack({ duration, segments, clips, currentTime, onSeek }
         className="relative h-10 bg-muted rounded-lg cursor-pointer overflow-hidden"
         onClick={handleClick}
       >
+        {waveformUrl && (
+          <img
+            src={waveformUrl}
+            alt=""
+            className="absolute inset-0 w-full h-full object-cover opacity-30 pointer-events-none"
+          />
+        )}
         {segments.map((seg, i) => {
           const left = (seg.start / duration) * 100;
           const width = ((seg.end - seg.start) / duration) * 100;

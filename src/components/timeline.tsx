@@ -9,9 +9,10 @@ interface TimelineProps {
   duration: number;
   segments: TimelineSegment[];
   clips: TimelineClip[];
+  waveformUrl?: string | null;
 }
 
-export function Timeline({ videoRef, duration, segments, clips }: TimelineProps) {
+export function Timeline({ videoRef, duration, segments, clips, waveformUrl }: TimelineProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const rafRef = useRef<number>(0);
 
@@ -42,6 +43,7 @@ export function Timeline({ videoRef, duration, segments, clips }: TimelineProps)
         clips={clips}
         currentTime={currentTime}
         onSeek={handleSeek}
+        waveformUrl={waveformUrl}
       />
     </div>
   );
