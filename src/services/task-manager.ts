@@ -130,6 +130,88 @@ export async function retryTask(id: string) {
   });
 }
 
+/**
+ * Re-export a completed task with edited segments.
+ * Skips transcription and analysis — only runs FFmpeg clean + subtitle generation.
+ */
+export async function reExportTask(
+  taskId: string,
+  editedSegments: Array<{ start: number; end: number; type: string; reason?: string }>,
+) {
+  const task = getTaskById(taskId);
+  if (!task) throw new Error("Task not found");
+
+  const config: TaskConfig = JSON.parse(task.config);
+  const result: TaskResult = task.result ? JSON.parse(task.result) : {};
+
+  updateTask(taskId, {
+    status: "processing",
+    progress: 50,
+    current_step: "Re-exporting with edited segments...",
+    error: null,
+  });
+
+  try {
+    const transcriptPath = path.join(TRANSCRIPTS_DIR, `${taskId}.json`);
+
+    // Convert to Segment[] for FFmpeg/subtitle functions
+    const segments = editedSegments.map((s) => ({
+      start: s.start,
+      end: s.end,
+      type: s.type as "keep" | "silence" | "filler",
+      reason: s.reason,
+    }));
+
+    taskLog(taskId, "Generating subtitles for edited segments...");
+    const srtPath = await generateSRT(
+      segments,
+      path.join(OUTPUTS_DIR, `${taskId}.srt`)
+    );
+    result.srt_file = srtPath;
+
+    const assPath = await generateAnimatedASS(
+      transcriptPath,
+      path.join(OUTPUTS_DIR, `${taskId}.ass`),
+      config.subtitle_style
+    );
+    result.subtitle_file = assPath;
+
+    taskLog(taskId, "Cleaning video with edited segments...");
+    updateTask(taskId, { progress: 65, current_step: "Encoding video..." });
+
+    const trimmedPath = path.join(TEMP_DIR, `${taskId}-trimmed.mp4`);
+    let videoPath = task.filepath;
+    try {
+      await fs.access(trimmedPath);
+      videoPath = trimmedPath;
+    } catch {
+      // No trimmed file, use original
+    }
+
+    const cleanedPath = await cleanVideo(
+      videoPath,
+      segments,
+      taskId,
+      config.burn_subtitles,
+      srtPath,
+      config
+    );
+    result.cleaned_video = cleanedPath;
+
+    taskLog(taskId, "Re-export complete!");
+    updateTask(taskId, {
+      status: "completed",
+      progress: 100,
+      current_step: "Done!",
+      result: JSON.stringify(result),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    taskLog(taskId, `Re-export failed: ${message}`, "error");
+    updateTask(taskId, { status: "failed", error: message });
+  }
+}
+
 // --- Processing pipeline ---
 // Progress mapping: 0-30% transcription, 30-50% analysis, 50-75% FFmpeg clean, 75-95% clips, 95-100% done
 async function processTask(taskId: string) {

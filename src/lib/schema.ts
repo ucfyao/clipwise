@@ -26,6 +26,7 @@ export interface TaskConfig {
   denoise: "off" | "light" | "medium" | "strong";
   speed: number;
   fade: { enabled: boolean; duration: number };
+  output_quality: "high" | "medium" | "low";
 }
 
 export interface TaskResult {
@@ -59,6 +60,7 @@ export const DEFAULT_CONFIG: TaskConfig = {
   denoise: "off",
   speed: 1,
   fade: { enabled: false, duration: 1 },
+  output_quality: "high",
 };
 
 // --- Timeline & SSE types ---
