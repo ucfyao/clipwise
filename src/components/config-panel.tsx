@@ -118,6 +118,11 @@ export function ConfigPanel({ videoInfo, onStart }: ConfigPanelProps) {
             keep_fillers: keepFillers,
             subtitle_style: subtitleStyle,
             burn_subtitles: burnSubtitles,
+            normalize_audio: false,
+            denoise: "off",
+            speed: 1,
+            fade: { enabled: false, duration: 1 },
+            output_quality: "high",
           })
         }
       >

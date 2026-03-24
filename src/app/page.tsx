@@ -11,7 +11,7 @@ import { useTaskSSE, type LogEntry } from "@/hooks/use-task-sse";
 import { LogTerminal } from "@/components/log-terminal";
 import { Button } from "@/components/ui/button";
 import { Scissors, Sparkles, Wand2 } from "lucide-react";
-import type { PageStatus, TaskConfig, TaskMode, TaskResult } from "@/lib/schema";
+import type { PageStatus, TaskConfig, TaskMode, TaskResult, TimelineSegment } from "@/lib/schema";
 
 interface VideoInfo {
   filename: string;
@@ -39,6 +39,10 @@ function Home() {
   const [fadeDuration, setFadeDuration] = useState(1);
   const [clientLogs, setClientLogs] = useState<LogEntry[]>([]);
   const [waveformUrl, setWaveformUrl] = useState<string | null>(null);
+  const [editedSegments, setEditedSegments] = useState<TimelineSegment[] | null>(null);
+  const [outputQuality, setOutputQuality] = useState<"high" | "medium" | "low">("high");
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const addLog = useCallback((message: string, level: "info" | "warn" | "error" = "info") => {
@@ -122,6 +126,10 @@ function Home() {
             denoise,
             speed,
             fade: { enabled: fadeEnabled, duration: fadeDuration },
+            output_quality: outputQuality,
+            trim: trimStart > 0 || (trimEnd > 0 && trimEnd < videoInfo.duration)
+              ? { start: trimStart, end: trimEnd || videoInfo.duration }
+              : undefined,
           } satisfies TaskConfig,
         }),
       });
@@ -135,12 +143,13 @@ function Home() {
       addLog("任务创建失败", "error");
       setPageStatus("failed");
     }
-  }, [videoInfo, mode, silenceThreshold, keepFillers, subtitleStyle, burnSubtitles, normalizeAudio, denoise, speed, fadeEnabled, fadeDuration, resetSSE, addLog]);
+  }, [videoInfo, mode, silenceThreshold, keepFillers, subtitleStyle, burnSubtitles, normalizeAudio, denoise, speed, fadeEnabled, fadeDuration, outputQuality, trimStart, trimEnd, resetSSE, addLog]);
 
   const handleReprocess = useCallback(() => {
     setPageStatus("uploaded");
     setTaskResult(null);
     setTaskId(null);
+    setEditedSegments(null);
     resetSSE();
   }, [resetSSE]);
 
@@ -150,8 +159,29 @@ function Home() {
     setTaskResult(null);
     setTaskId(null);
     setWaveformUrl(null);
+    setEditedSegments(null);
+    setTrimStart(0);
+    setTrimEnd(0);
     resetSSE();
   }, [resetSSE]);
+
+  const handleReExport = useCallback(async () => {
+    if (!taskId || !editedSegments) return;
+    addLog("Re-exporting with edited segments...");
+    setPageStatus("processing");
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/re-export`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ segments: editedSegments }),
+      });
+      if (!res.ok) throw new Error("Re-export failed");
+      addLog("Re-export started");
+    } catch {
+      addLog("Re-export request failed", "error");
+      setPageStatus("failed");
+    }
+  }, [taskId, editedSegments, addLog]);
 
   const cleanedVideoUrl = taskResult?.cleaned_video
     ? `/api/tasks/${taskId}/stream`
@@ -429,6 +459,50 @@ function Home() {
                   </div>
                 )}
               </div>
+              {/* Output quality */}
+              <div>
+                <span className="text-xs text-[#a0a0b8] block mb-1.5">导出质量</span>
+                <select
+                  value={outputQuality}
+                  onChange={(e) => setOutputQuality(e.target.value as "high" | "medium" | "low")}
+                  disabled={isProcessing}
+                  className="w-full bg-[#252540] border border-[#3a3a5a] rounded-lg px-3 py-2 text-xs text-[#f0f0f5] focus:border-[#6366f1] focus:outline-none disabled:opacity-50"
+                >
+                  <option value="high">高 (原始质量)</option>
+                  <option value="medium">中 (4Mbps, max 1080p)</option>
+                  <option value="low">低 (2Mbps, max 720p)</option>
+                </select>
+              </div>
+
+              {/* Trim range */}
+              {videoInfo && (
+                <div>
+                  <span className="text-xs text-[#a0a0b8] block mb-1.5">处理范围 (秒)</span>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="number"
+                      min={0}
+                      max={trimEnd || videoInfo.duration}
+                      step={1}
+                      value={Math.floor(trimStart)}
+                      onChange={(e) => setTrimStart(Number(e.target.value))}
+                      disabled={isProcessing}
+                      className="w-16 bg-[#252540] border border-[#3a3a5a] rounded px-2 py-1 text-xs text-[#f0f0f5]"
+                    />
+                    <span className="text-xs text-[#a0a0b8]">—</span>
+                    <input
+                      type="number"
+                      min={trimStart}
+                      max={videoInfo.duration}
+                      step={1}
+                      value={Math.floor(trimEnd || videoInfo.duration)}
+                      onChange={(e) => setTrimEnd(Number(e.target.value))}
+                      disabled={isProcessing}
+                      className="w-16 bg-[#252540] border border-[#3a3a5a] rounded px-2 py-1 text-xs text-[#f0f0f5]"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -475,9 +549,11 @@ function Home() {
             <Timeline
               videoRef={videoRef}
               duration={videoInfo.duration}
-              segments={segments}
+              segments={editedSegments ?? segments}
               clips={clips}
               waveformUrl={waveformUrl}
+              editable={pageStatus === "done"}
+              onSegmentsChange={(segs) => setEditedSegments(segs)}
             />
           )}
         </main>
@@ -551,6 +627,18 @@ function Home() {
                   <span>已删除</span>
                   <span>{segments.filter((s) => s.type === "silence" || s.type === "filler").reduce((a, s) => a + (s.end - s.start), 0).toFixed(1)}s</span>
                 </div>
+              </div>
+            )}
+
+            {/* Re-export button */}
+            {pageStatus === "done" && editedSegments && (
+              <div className="mx-4 mt-2">
+                <Button
+                  className="w-full bg-gradient-to-r from-[#6366f1] to-[#8b5cf6] hover:from-[#5558e6] hover:to-[#7c4ff0] text-white text-xs"
+                  onClick={handleReExport}
+                >
+                  重新导出 (已编辑 {editedSegments.filter(s => s.type === "keep" || s.type === "speech").length} 段保留)
+                </Button>
               </div>
             )}
 

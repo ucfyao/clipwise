@@ -10,6 +10,10 @@ interface TimelineTrackProps {
   currentTime: number;
   onSeek: (time: number) => void;
   waveformUrl?: string | null;
+  editable?: boolean;
+  onSegmentToggle?: (index: number) => void;
+  onSegmentResize?: (index: number, edge: "start" | "end", newTime: number) => void;
+  onSegmentSplit?: (index: number, splitTime: number) => void;
 }
 
 const SEGMENT_COLORS: Record<TimelineSegment["type"], string> = {
@@ -19,7 +23,10 @@ const SEGMENT_COLORS: Record<TimelineSegment["type"], string> = {
   filler: "bg-orange-500/50",
 };
 
-export function TimelineTrack({ duration, segments, clips, currentTime, onSeek, waveformUrl }: TimelineTrackProps) {
+export function TimelineTrack({
+  duration, segments, clips, currentTime, onSeek, waveformUrl,
+  editable, onSegmentToggle, onSegmentResize, onSegmentSplit,
+}: TimelineTrackProps) {
   const rulers = useMemo(() => {
     if (duration <= 0) return [];
     const count = Math.min(Math.ceil(duration / 30), 10);
@@ -38,6 +45,27 @@ export function TimelineTrack({ duration, segments, clips, currentTime, onSeek, 
     onSeek(pct * duration);
   };
 
+  const handleDragStart = (e: React.MouseEvent, segIndex: number, edge: "start" | "end") => {
+    if (!onSegmentResize) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const container = (e.currentTarget as HTMLElement).closest(".timeline-track-container") as HTMLElement;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const onMove = (moveEvent: MouseEvent) => {
+      const pct = Math.max(0, Math.min(1, (moveEvent.clientX - rect.left) / rect.width));
+      const newTime = Math.round(pct * duration * 100) / 100;
+      onSegmentResize(segIndex, edge, newTime);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
   const playheadPct = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
@@ -49,7 +77,7 @@ export function TimelineTrack({ duration, segments, clips, currentTime, onSeek, 
       </div>
 
       <div
-        className="relative h-10 bg-muted rounded-lg cursor-pointer overflow-hidden"
+        className="timeline-track-container relative h-10 bg-muted rounded-lg cursor-pointer overflow-hidden"
         onClick={handleClick}
       >
         {waveformUrl && (
@@ -65,10 +93,38 @@ export function TimelineTrack({ duration, segments, clips, currentTime, onSeek, 
           return (
             <div
               key={i}
-              className={`absolute top-0 h-full ${SEGMENT_COLORS[seg.type]} transition-all`}
+              className={`absolute top-0 h-full ${SEGMENT_COLORS[seg.type]} transition-all ${
+                editable ? "cursor-pointer hover:brightness-125" : ""
+              }`}
               style={{ left: `${left}%`, width: `${Math.max(width, 0.2)}%` }}
               title={seg.reason || seg.type}
-            />
+              onClick={(e) => {
+                if (!editable || !onSegmentToggle) return;
+                e.stopPropagation();
+                onSegmentToggle(i);
+              }}
+              onContextMenu={(e) => {
+                if (!editable || !onSegmentSplit) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const rect = e.currentTarget.parentElement!.getBoundingClientRect();
+                const pct = (e.clientX - rect.left) / rect.width;
+                onSegmentSplit(i, pct * duration);
+              }}
+            >
+              {editable && (
+                <>
+                  <div
+                    className="absolute left-0 top-0 w-1.5 h-full cursor-col-resize bg-white/30 hover:bg-white/60 z-20"
+                    onMouseDown={(e) => handleDragStart(e, i, "start")}
+                  />
+                  <div
+                    className="absolute right-0 top-0 w-1.5 h-full cursor-col-resize bg-white/30 hover:bg-white/60 z-20"
+                    onMouseDown={(e) => handleDragStart(e, i, "end")}
+                  />
+                </>
+              )}
+            </div>
           );
         })}
 

@@ -6,6 +6,12 @@ import { Segment } from "./analyze";
 import { Clip } from "./extract";
 import fs from "fs/promises";
 
+const QUALITY_PRESETS = {
+  high:   { bitrate: null,  maxHeight: 0 },     // null = use -q:v quality mode, 0 = no downscale
+  medium: { bitrate: "4M",  maxHeight: 1080 },
+  low:    { bitrate: "2M",  maxHeight: 720 },
+} as const;
+
 function runFFmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     console.log(`[ffmpeg] Running: ffmpeg ${args.join(" ").slice(0, 200)}...`);
@@ -131,7 +137,13 @@ export async function cleanVideo(
     currentVideoLabel = nextLabel;
   }
 
-  // 2. Video enhancement filters + fade
+  // 2. Quality downscale (if needed)
+  const preset = QUALITY_PRESETS[config?.output_quality ?? "high"];
+  if (preset.maxHeight > 0) {
+    videoFilters.unshift(`scale=-2:'min(ih,${preset.maxHeight})'`);
+  }
+
+  // 3. Video enhancement filters + fade
   const allVideoFilters = [...videoFilters, ...videoFadeFilters];
   if (allVideoFilters.length > 0) {
     const nextLabel = "enhv";
@@ -154,12 +166,16 @@ export async function cleanVideo(
 
   const filterComplex = filterParts.join(";");
 
+  const videoEncArgs = preset.bitrate
+    ? ["-c:v", "h264_videotoolbox", "-b:v", preset.bitrate]
+    : ["-c:v", "h264_videotoolbox", "-q:v", "65"];
+
   await runFFmpeg([
     "-i", inputPath,
     "-filter_complex", filterComplex,
     "-map", `[${currentVideoLabel}]`,
     "-map", `[${currentAudioLabel}]`,
-    "-c:v", "h264_videotoolbox", "-q:v", "65",
+    ...videoEncArgs,
     "-c:a", "aac", "-b:a", "128k",
     outputPath,
   ]);
@@ -204,11 +220,16 @@ export async function extractClip(
   }
 
   // --- First call: re-encode with audio enhancements ---
+  const clipPreset = QUALITY_PRESETS[config?.output_quality ?? "high"];
+  const clipVideoEncArgs = clipPreset.bitrate
+    ? ["-c:v", "h264_videotoolbox", "-b:v", clipPreset.bitrate]
+    : ["-c:v", "h264_videotoolbox", "-q:v", "65"];
+
   const firstCallArgs = [
     "-i", inputPath,
     "-ss", clip.start.toString(),
     "-to", clip.end.toString(),
-    "-c:v", "h264_videotoolbox", "-q:v", "65",
+    ...clipVideoEncArgs,
   ];
 
   const allAudioFilters = [...audioFilters, ...audioFadeFilters];
@@ -224,7 +245,11 @@ export async function extractClip(
   // --- Second call: vertical crop + video enhancements ---
   const croppedPath = path.join(OUTPUTS_DIR, `${taskId}-clip${clipIndex}-vertical.mp4`);
 
-  const allVideoFilters = ["crop=ih*9/16:ih", ...videoFilters, ...videoFadeFilters];
+  const scaleFilters: string[] = [];
+  if (clipPreset.maxHeight > 0) {
+    scaleFilters.push(`scale=-2:'min(ih,${clipPreset.maxHeight})'`);
+  }
+  const allVideoFilters = ["crop=ih*9/16:ih", ...scaleFilters, ...videoFilters, ...videoFadeFilters];
   const secondCallArgs = [
     "-i", outputPath,
     "-vf", allVideoFilters.join(","),
