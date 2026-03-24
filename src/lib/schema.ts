@@ -27,6 +27,7 @@ export interface TaskConfig {
   speed: number;
   fade: { enabled: boolean; duration: number };
   output_quality: "high" | "medium" | "low";
+  bgm?: { filepath: string; volume: number };
 }
 
 export interface TaskResult {

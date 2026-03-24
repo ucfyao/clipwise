@@ -76,7 +76,8 @@ export async function cleanVideo(
   taskId: string,
   burnSubtitles: boolean,
   srtPath?: string,
-  config?: TaskConfig
+  config?: TaskConfig,
+  bgmPath?: string
 ): Promise<string> {
   const keepSegments = segments.filter((s) => s.type === "keep");
   if (!keepSegments.length) throw new Error("No segments to keep");
@@ -164,14 +165,33 @@ export async function cleanVideo(
     currentAudioLabel = nextLabel;
   }
 
+  // --- BGM mixing (if provided) ---
+  // BGM is input [1:a], loop it to cover the full duration, adjust volume, then amix with main audio
+  const bgmVolume = config?.bgm?.volume ?? 0.3;
+  if (bgmPath) {
+    const bgmLabel = "bgm";
+    // aloop loops the entire BGM, atrim cuts to video duration, volume adjusts level
+    filterParts.push(
+      `[1:a]aloop=loop=-1:size=2e+09,atrim=duration=${totalDuration.toFixed(3)},volume=${bgmVolume.toFixed(2)}[${bgmLabel}]`
+    );
+    const mixedLabel = "mixed";
+    filterParts.push(
+      `[${currentAudioLabel}][${bgmLabel}]amix=inputs=2:duration=first:dropout_transition=2[${mixedLabel}]`
+    );
+    currentAudioLabel = mixedLabel;
+  }
+
   const filterComplex = filterParts.join(";");
 
   const videoEncArgs = preset.bitrate
     ? ["-c:v", "h264_videotoolbox", "-b:v", preset.bitrate]
     : ["-c:v", "h264_videotoolbox", "-q:v", "65"];
 
+  const inputArgs = ["-i", inputPath];
+  if (bgmPath) inputArgs.push("-i", bgmPath);
+
   await runFFmpeg([
-    "-i", inputPath,
+    ...inputArgs,
     "-filter_complex", filterComplex,
     "-map", `[${currentVideoLabel}]`,
     "-map", `[${currentAudioLabel}]`,

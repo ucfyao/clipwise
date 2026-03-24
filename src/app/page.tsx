@@ -10,7 +10,7 @@ import { SettingsDrawer } from "@/components/settings-drawer";
 import { useTaskSSE, type LogEntry } from "@/hooks/use-task-sse";
 import { LogTerminal } from "@/components/log-terminal";
 import { Button } from "@/components/ui/button";
-import { Scissors, Sparkles, Wand2 } from "lucide-react";
+import { Music, Scissors, Sparkles, Wand2, X } from "lucide-react";
 import type { PageStatus, TaskConfig, TaskMode, TaskResult, TimelineSegment } from "@/lib/schema";
 
 interface VideoInfo {
@@ -43,6 +43,10 @@ function Home() {
   const [outputQuality, setOutputQuality] = useState<"high" | "medium" | "low">("high");
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(0);
+  const [bgmFile, setBgmFile] = useState<{ filepath: string; filename: string } | null>(null);
+  const [bgmVolume, setBgmVolume] = useState(0.3);
+  const [bgmUploading, setBgmUploading] = useState(false);
+  const bgmInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const addLog = useCallback((message: string, level: "info" | "warn" | "error" = "info") => {
@@ -130,6 +134,7 @@ function Home() {
             trim: trimStart > 0 || (trimEnd > 0 && trimEnd < videoInfo.duration)
               ? { start: trimStart, end: trimEnd || videoInfo.duration }
               : undefined,
+            bgm: bgmFile ? { filepath: bgmFile.filepath, volume: bgmVolume } : undefined,
           } satisfies TaskConfig,
         }),
       });
@@ -143,7 +148,7 @@ function Home() {
       addLog("任务创建失败", "error");
       setPageStatus("failed");
     }
-  }, [videoInfo, mode, silenceThreshold, keepFillers, subtitleStyle, burnSubtitles, normalizeAudio, denoise, speed, fadeEnabled, fadeDuration, outputQuality, trimStart, trimEnd, resetSSE, addLog]);
+  }, [videoInfo, mode, silenceThreshold, keepFillers, subtitleStyle, burnSubtitles, normalizeAudio, denoise, speed, fadeEnabled, fadeDuration, outputQuality, trimStart, trimEnd, bgmFile, bgmVolume, resetSSE, addLog]);
 
   const handleReprocess = useCallback(() => {
     setPageStatus("uploaded");
@@ -162,6 +167,7 @@ function Home() {
     setEditedSegments(null);
     setTrimStart(0);
     setTrimEnd(0);
+    setBgmFile(null);
     resetSSE();
   }, [resetSSE]);
 
@@ -182,6 +188,27 @@ function Home() {
       setPageStatus("failed");
     }
   }, [taskId, editedSegments, addLog]);
+
+  const handleBgmUpload = useCallback(async (file: File) => {
+    if (!file.type.startsWith("audio/")) {
+      addLog("请选择音频文件", "error");
+      return;
+    }
+    setBgmUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      if (!res.ok) throw new Error("Upload failed");
+      const { filepath } = await res.json();
+      setBgmFile({ filepath, filename: file.name });
+      addLog(`背景音乐已加载: ${file.name}`);
+    } catch {
+      addLog("背景音乐上传失败", "error");
+    } finally {
+      setBgmUploading(false);
+    }
+  }, [addLog]);
 
   const cleanedVideoUrl = taskResult?.cleaned_video
     ? `/api/tasks/${taskId}/stream`
@@ -503,6 +530,66 @@ function Home() {
                   </div>
                 </div>
               )}
+
+              {/* Background music */}
+              <div>
+                <span className="text-xs text-[#a0a0b8] block mb-1.5">背景音乐</span>
+                <input
+                  ref={bgmInputRef}
+                  type="file"
+                  accept="audio/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleBgmUpload(file);
+                    e.target.value = "";
+                  }}
+                />
+                {bgmFile ? (
+                  <div className="flex items-center gap-2 bg-[#252540] border border-[#3a3a5a] rounded-lg px-3 py-2">
+                    <Music className="w-3.5 h-3.5 text-[#6366f1] shrink-0" />
+                    <span className="text-xs text-[#f0f0f5] truncate flex-1">{bgmFile.filename}</span>
+                    <button
+                      onClick={() => setBgmFile(null)}
+                      disabled={isProcessing}
+                      className="text-[#a0a0b8] hover:text-red-400 transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => bgmInputRef.current?.click()}
+                    disabled={isProcessing || bgmUploading}
+                    className="w-full flex items-center justify-center gap-2 bg-[#252540] border border-dashed border-[#3a3a5a] rounded-lg px-3 py-2 text-xs text-[#a0a0b8] hover:border-[#6366f1]/50 hover:text-[#6366f1] transition-all disabled:opacity-50"
+                  >
+                    <Music className="w-3.5 h-3.5" />
+                    {bgmUploading ? "上传中..." : "选择音频文件"}
+                  </button>
+                )}
+                {bgmFile && (
+                  <div className="mt-2">
+                    <div className="flex justify-between mb-1">
+                      <span className="text-[10px] text-[#a0a0b8]">音量</span>
+                      <span className="text-[10px] text-[#6366f1] font-medium">{Math.round(bgmVolume * 100)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.05"
+                      max="1"
+                      step="0.05"
+                      value={bgmVolume}
+                      onChange={(e) => setBgmVolume(Number(e.target.value))}
+                      disabled={isProcessing}
+                      className="w-full h-1.5 rounded-full appearance-none bg-[#252540] accent-[#6366f1] cursor-pointer disabled:opacity-50"
+                    />
+                    <div className="flex justify-between mt-0.5">
+                      <span className="text-[10px] text-[#a0a0b8]/60">5%</span>
+                      <span className="text-[10px] text-[#a0a0b8]/60">100%</span>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
