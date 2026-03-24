@@ -194,7 +194,8 @@ export async function reExportTask(
       taskId,
       config.burn_subtitles,
       srtPath,
-      config
+      config,
+      config.bgm?.filepath
     );
     result.cleaned_video = cleanedPath;
 
@@ -355,7 +356,8 @@ async function processTask(taskId: string) {
         taskId,
         config.burn_subtitles,
         srtPath,
-        config
+        config,
+        config.bgm?.filepath
       );
       result.cleaned_video = cleanedPath;
       taskLog(taskId, `Video cleaned: ${cleanedPath}`);
